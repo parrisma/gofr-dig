@@ -1,0 +1,328 @@
+"""Pytest configuration and fixtures
+
+Provides shared fixtures for all tests, including temporary data directories,
+auth service setup, and test server token management.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+# Add project root to sys.path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.auth import AuthService
+from app.config import Config
+
+
+# ============================================================================
+# AUTH AND TOKEN CONFIGURATION
+# ============================================================================
+
+# Shared JWT secret for all test servers and token generation
+# Must match the secret used when launching test MCP/web servers
+TEST_JWT_SECRET = "test-secret-key-for-secure-testing-do-not-use-in-production"
+
+# Get token store path from environment or use default based on project root
+if "GOFR_DIG_TOKEN_STORE" not in os.environ:
+    # Calculate from gofr-dig.env pattern
+    project_root = Path(__file__).parent.parent
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    TEST_TOKEN_STORE_PATH = str(logs_dir / "gofr_dig_tokens.json")
+else:
+    TEST_TOKEN_STORE_PATH = os.environ["GOFR_DIG_TOKEN_STORE"]
+
+TEST_GROUP = "test_group"
+
+
+@pytest.fixture(scope="function", autouse=True)
+def test_data_dir(tmp_path):
+    """
+    Automatically provide a temporary data directory for each test
+
+    This fixture:
+    - Creates a unique temporary directory for each test
+    - Configures app.config to use this directory
+    - Cleans up after the test completes
+    """
+    # Set up test mode with temporary directory
+    test_dir = tmp_path / "gofr_dig_test_data"
+    test_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create subdirectories
+    (test_dir / "storage").mkdir(exist_ok=True)
+    (test_dir / "auth").mkdir(exist_ok=True)
+
+    # Configure for testing
+    Config.set_test_mode(test_dir)
+
+    yield test_dir
+
+    Config.clear_test_mode()
+
+
+@pytest.fixture(scope="function")
+def temp_storage_dir(tmp_path):
+    """
+    Provide a temporary storage directory for specific tests that need it
+
+    Returns:
+        Path object pointing to temporary storage directory
+    """
+    storage_dir = tmp_path / "storage"
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    return storage_dir
+
+
+@pytest.fixture(scope="function")
+def temp_auth_dir(tmp_path):
+    """
+    Provide a temporary auth directory for specific tests that need it
+
+    Returns:
+        Path object pointing to temporary auth directory
+    """
+    auth_dir = tmp_path / "auth"
+    auth_dir.mkdir(parents=True, exist_ok=True)
+    return auth_dir
+
+
+@pytest.fixture(scope="session")
+def test_auth_service():
+    """
+    Create an AuthService instance for testing with a shared token store.
+
+    This AuthService uses:
+    - The same JWT secret as test MCP/web servers: TEST_JWT_SECRET
+    - A shared token store at: TEST_TOKEN_STORE_PATH
+
+    Test servers must be launched with:
+      --jwt-secret "test-secret-key-for-secure-testing-do-not-use-in-production"
+      --token-store "/tmp/gofr_dig_test_tokens.json"
+
+    Or via environment variables:
+      GOFR_DIG_JWT_SECRET=test-secret-key-for-secure-testing-do-not-use-in-production
+      GOFR_DIG_TOKEN_STORE=/tmp/gofr_dig_test_tokens.json
+
+    Returns:
+        AuthService: Configured auth service with shared secret and token store
+    """
+    auth_service = AuthService(secret_key=TEST_JWT_SECRET, token_store_path=TEST_TOKEN_STORE_PATH)
+    return auth_service
+
+
+@pytest.fixture(scope="function")
+def test_jwt_token(test_auth_service):
+    """
+    Provide a valid JWT token for tests that require authentication.
+
+    Token is created at test start and revoked at test end.
+
+    Usage in tests:
+        @pytest.mark.asyncio
+        async def test_something(test_jwt_token):
+            headers = {"Authorization": f"Bearer {test_jwt_token}"}
+            # Use token in HTTP requests
+
+    Returns:
+        str: A valid JWT token for testing with 1 hour expiry
+    """
+    # Create token with 1 hour expiry
+    token = test_auth_service.create_token(group=TEST_GROUP, expires_in_seconds=3600)
+
+    yield token
+
+    # Cleanup: revoke token after test
+    try:
+        test_auth_service.revoke_token(token)
+    except Exception:
+        pass  # Token may already be revoked or expired
+
+
+# ============================================================================
+# PHASE 4: CONSOLIDATED AUTH FIXTURES
+# ============================================================================
+
+
+@pytest.fixture(scope="function")
+def temp_token_store(tmp_path):
+    """
+    Create an isolated temporary token store for tests requiring token isolation.
+
+    Use this when:
+    - Testing cross-group access control
+    - Tests need separate token stores (no token persistence)
+    - Parallel test isolation requirements
+
+    Returns:
+        str: Path to temporary token store file (auto-cleaned up)
+    """
+    token_store = tmp_path / "isolated_tokens.json"
+    return str(token_store)
+
+
+@pytest.fixture(scope="function")
+def auth_service():
+    """
+    Create an AuthService using the shared token store for MCP/web server tests.
+
+    This is the standard fixture name used across most test files.
+    Uses the same token store as running MCP/web servers for integration tests.
+
+    Use this for:
+    - MCP server tests (requires shared token store)
+    - Web server tests (requires shared token store)
+    - Integration tests with running servers
+
+    For isolated token testing, use test_auth_service or create a custom fixture.
+
+    Returns:
+        AuthService: Configured with TEST_JWT_SECRET and shared token store
+    """
+    return AuthService(secret_key=TEST_JWT_SECRET, token_store_path=TEST_TOKEN_STORE_PATH)
+
+
+@pytest.fixture(scope="function")
+def mcp_headers(auth_service):
+    """
+    Provide pre-configured authentication headers for MCP server tests.
+
+    Creates a token for 'test_group' with 1 hour expiry.
+
+    Usage:
+        async def test_mcp_endpoint(mcp_headers):
+            async with MCPClient(MCP_URL) as client:
+                result = await client.call_tool("tool_name", {...})
+                # Headers automatically included
+
+    Returns:
+        Dict[str, str]: {"Authorization": "Bearer <token>"}
+    """
+    token = auth_service.create_token(group="test_group", expires_in_seconds=3600)
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_test_auth_environment():
+    """
+    Configure environment variables for test server authentication.
+
+    This ensures test MCP/web servers use the same JWT secret and token store
+    as the test fixtures. Auto-runs before all tests.
+    """
+    os.environ["GOFR_DIG_JWT_SECRET"] = TEST_JWT_SECRET
+    os.environ["GOFR_DIG_TOKEN_STORE"] = TEST_TOKEN_STORE_PATH
+
+    # Ensure token store directory exists
+    token_store_dir = Path(TEST_TOKEN_STORE_PATH).parent
+    token_store_dir.mkdir(parents=True, exist_ok=True)
+
+    yield
+
+    # Cleanup: optional - clear environment after tests
+    os.environ.pop("GOFR_DIG_JWT_SECRET", None)
+    os.environ.pop("GOFR_DIG_TOKEN_STORE", None)
+
+
+# ============================================================================
+# TEST SERVER MANAGEMENT
+# ============================================================================
+
+# Import ServerManager for managing test servers
+try:
+    # Try to import ServerManager - may fail if not in the test directory
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).parent))
+    from test_server_manager import ServerManager
+except (ImportError, ModuleNotFoundError):
+    ServerManager = None
+
+
+@pytest.fixture(scope="session")
+def test_server_manager():
+    """
+    Create a ServerManager for controlling test servers in auth mode.
+
+    This manages the lifecycle of MCP and web servers for integration testing.
+    Servers started with this manager will use the shared JWT secret and
+    token store configured in configure_test_auth_environment.
+
+    Usage:
+        def test_with_server(test_server_manager, test_data_dir):
+            # Start MCP server with auth enabled
+            success = test_server_manager.start_mcp_server(
+                templates_dir=str(test_data_dir / "docs/templates"),
+                styles_dir=str(test_data_dir / "docs/styles"),
+                storage_dir=str(test_data_dir / "storage"),
+            )
+            if not success:
+                pytest.skip("MCP server failed to start")
+
+            # Server is ready at: test_server_manager.get_mcp_url()
+
+            yield  # Test runs with server active
+
+            # Server automatically stops here when fixture context ends
+
+    Returns:
+        ServerManager: Server manager instance, or None if import failed
+    """
+    if ServerManager is None:
+        return None
+
+    manager = ServerManager(
+        jwt_secret=TEST_JWT_SECRET,
+        token_store_path=TEST_TOKEN_STORE_PATH,
+        mcp_port=8013,
+        web_port=8000,
+    )
+
+    yield manager
+
+    # Cleanup: stop all servers
+    manager.stop_all()
+
+
+# ============================================================================
+# MOCK IMAGE SERVER FOR TESTING
+# ============================================================================
+
+
+@pytest.fixture(scope="function")
+def image_server():
+    """
+    Provide a lightweight HTTP server for serving test images.
+
+    The server serves files from test/mock/data directory on port 8765.
+    Use image_server.get_url(filename) to get the full URL for a test image.
+
+    Usage:
+        def test_image_download(image_server):
+            url = image_server.get_url("graph.png")
+            # url is "http://localhost:8765/graph.png"
+            # Make requests to this URL
+
+    Returns:
+        ImageServer: Server instance with start(), stop(), and get_url() methods
+    """
+    import sys
+    from pathlib import Path
+
+    # Add test directory to path for imports
+    test_dir = Path(__file__).parent
+    if str(test_dir) not in sys.path:
+        sys.path.insert(0, str(test_dir))
+
+    from mock.image_server import ImageServer
+
+    server = ImageServer(port=8765)
+    server.start()
+
+    yield server
+
+    server.stop()
