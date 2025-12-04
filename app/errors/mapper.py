@@ -23,22 +23,36 @@ except ImportError:
                 setattr(self, k, v)
 
 
-# Recovery strategy templates for common error types
+# Recovery strategy templates for common error types in web scraping
 RECOVERY_STRATEGIES: Dict[str, str] = {
-    "SESSION_NOT_FOUND": "Verify the session_id is correct and belongs to your group. Call list_active_sessions to see your sessions.",
-    "TEMPLATE_NOT_FOUND": "Use list_templates to see available templates for your group.",
-    "FRAGMENT_NOT_FOUND": "Call list_session_fragments to see current fragment instances and their GUIDs.",
-    "INVALID_FRAGMENT_PARAMETERS": "Call get_fragment_details to see required and optional parameters for this fragment type.",
-    "INVALID_GLOBAL_PARAMETERS": "Call get_template_details to see required global parameters for this template.",
-    "INVALID_POSITION": "Use 'start', 'end', 'before:<guid>', or 'after:<guid>' format. Call list_session_fragments to get valid GUIDs.",
-    "INVALID_SESSION_STATE": "Ensure global parameters are set before adding fragments or rendering.",
-    "INVALID_TABLE_DATA": "Review table validation requirements in documentation. Ensure rows are consistent and required parameters are provided.",
-    "INVALID_COLOR": "Use theme colors (blue, orange, green, red, purple, etc.) or hex format (#RRGGBB or #RGB).",
-    "NUMBER_FORMAT_ERROR": "Use format specifications like 'currency:USD', 'percent', 'decimal:2', 'integer', or 'accounting'.",
-    "INVALID_COLUMN_WIDTH": "Column widths must be percentages (e.g., '25%') and total <= 100%.",
-    "STYLE_NOT_FOUND": "Use list_styles to see available styles for your group.",
-    "GROUP_MISMATCH": "Ensure the resource belongs to your group. Check group_id in your request.",
-    "CONFIGURATION_ERROR": "Check server logs for configuration details. Contact administrator if issue persists.",
+    # URL and fetch errors
+    "INVALID_URL": "Ensure the URL is properly formatted with http:// or https:// scheme.",
+    "URL_NOT_FOUND": "Verify the URL exists and is accessible. The server returned 404.",
+    "FETCH_ERROR": "Check network connectivity and that the target site is online. Try again later.",
+    "TIMEOUT_ERROR": "The request timed out. Try increasing timeout or check if the site is slow/unresponsive.",
+    "CONNECTION_ERROR": "Could not connect to the server. Verify the URL and check network connectivity.",
+    
+    # Robots.txt and access
+    "ROBOTS_BLOCKED": "Access blocked by robots.txt. Use set_antidetection with respect_robots_txt=false to override (use responsibly).",
+    "ACCESS_DENIED": "The server denied access. Try using a different anti-detection profile or custom headers.",
+    "RATE_LIMITED": "Too many requests. Increase rate_limit_delay in set_antidetection settings.",
+    
+    # Content extraction errors
+    "SELECTOR_NOT_FOUND": "The CSS selector matched no elements. Verify the selector syntax and that the element exists on the page.",
+    "INVALID_SELECTOR": "The CSS selector syntax is invalid. Check for typos and proper CSS selector format.",
+    "EXTRACTION_ERROR": "Failed to extract content. The page may have unexpected structure or encoding.",
+    "ENCODING_ERROR": "Character encoding issue. The page may use an unsupported encoding.",
+    
+    # Anti-detection errors
+    "INVALID_PROFILE": "Use one of: 'stealth', 'balanced', 'none', or 'custom' for anti-detection profile.",
+    "INVALID_HEADERS": "Custom headers must be a dictionary with string keys and values.",
+    
+    # Crawl errors
+    "MAX_DEPTH_EXCEEDED": "Crawl depth is limited to 3. Use depth=1, 2, or 3.",
+    "MAX_PAGES_EXCEEDED": "Too many pages requested. Reduce max_pages_per_level (max 20).",
+    
+    # Configuration errors
+    "CONFIGURATION_ERROR": "Check server configuration. Contact administrator if issue persists.",
 }
 
 

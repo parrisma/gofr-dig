@@ -404,6 +404,11 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         "crawl_depth": depth,
         "max_pages_per_level": max_pages_per_level,
         "start_url": url,
+        # Top-level content fields will be populated from root page
+        "url": None,
+        "title": None,
+        "text": None,
+        "language": None,
         "pages": [],
         "summary": {
             "total_pages": 0,
@@ -417,6 +422,20 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     root_page = await fetch_single_page(url)
     if root_page is None or not root_page.get("success"):
         return [_json_text(root_page or {"success": False, "error": "Failed to fetch root URL"})]
+
+    # Populate top-level fields from root page
+    results["url"] = root_page.get("url")
+    results["title"] = root_page.get("title")
+    results["text"] = root_page.get("text")
+    results["language"] = root_page.get("language")
+    if root_page.get("headings"):
+        results["headings"] = root_page.get("headings")
+    if root_page.get("links"):
+        results["links"] = root_page.get("links")
+    if root_page.get("images"):
+        results["images"] = root_page.get("images")
+    if root_page.get("meta"):
+        results["meta"] = root_page.get("meta")
 
     root_page["depth"] = 1
     results["pages"].append(root_page)
