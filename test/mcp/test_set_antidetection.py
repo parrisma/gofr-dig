@@ -262,9 +262,10 @@ class TestSetAntidetectionMCPTool:
         result = await handle_call_tool("set_antidetection", {"profile": "invalid"})
 
         data = get_mcp_result_data(result)
-        assert "error" in data
-        assert "invalid" in data["error"].lower()
-        assert "valid_profiles" in data
+        assert data["success"] is False
+        assert data["error_code"] == "INVALID_PROFILE"
+        assert "recovery_strategy" in data
+        assert "valid_profiles" in data.get("details", {})
 
     @pytest.mark.asyncio
     async def test_set_robots_txt_option(self):

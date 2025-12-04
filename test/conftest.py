@@ -351,10 +351,10 @@ class HTMLFixtureServer:
         fixtures_dir = self._fixtures_dir
 
         class Handler(http.server.SimpleHTTPRequestHandler):
-            def __init__(handler_self, *args, directory=None, **kwargs):  # noqa: ARG002, N805
+            def __init__(self, *args, directory=None, **kwargs):  # noqa: ARG002
                 super().__init__(*args, directory=str(fixtures_dir), **kwargs)  # type: ignore[arg-type]
 
-            def log_message(handler_self, format, *args):  # noqa: A002, ARG002, N805
+            def log_message(self, format, *args):  # noqa: A002, ARG002
                 pass  # Suppress logging
 
         self._server = http.server.HTTPServer(("127.0.0.1", self.port), Handler)

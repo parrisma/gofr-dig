@@ -19,6 +19,8 @@ from app.scraping import (
     fetch_url,
 )
 from app.scraping.state import get_scraping_state
+from app.exceptions import GofrDigError
+from app.errors.mapper import error_to_mcp_response, RECOVERY_STRATEGIES
 
 # Module-level configuration (set by main_mcp.py)
 auth_service: Any = None
@@ -35,55 +37,108 @@ def _json_text(data: Dict[str, Any]) -> TextContent:
     return TextContent(type="text", text=json.dumps(data, indent=2))
 
 
+def _error_response(
+    error_code: str,
+    message: str,
+    details: Dict[str, Any] | None = None,
+) -> List[TextContent]:
+    """Create a standardized error response with recovery strategy.
+    
+    Args:
+        error_code: Machine-readable error code (e.g., "INVALID_URL")
+        message: Human-readable error message
+        details: Optional additional context
+        
+    Returns:
+        List with single TextContent containing JSON error response
+    """
+    response: Dict[str, Any] = {
+        "success": False,
+        "error_code": error_code,
+        "error": message,
+        "recovery_strategy": RECOVERY_STRATEGIES.get(
+            error_code,
+            "Review the error message and try again.",
+        ),
+    }
+    if details:
+        response["details"] = details
+    
+    logger.warning("Tool error", error_code=error_code, error_message=message, details=details)
+    return [_json_text(response)]
+
+
+def _exception_response(error: GofrDigError) -> List[TextContent]:
+    """Convert GofrDigError to MCP response format.
+    
+    Args:
+        error: The exception to convert
+        
+    Returns:
+        List with single TextContent containing JSON error response
+    """
+    response = error_to_mcp_response(error)
+    logger.warning("Tool exception", error_code=response["error_code"], error_message=response["message"])
+    return [_json_text(response)]
+
+
 @app.list_tools()
 async def handle_list_tools() -> List[Tool]:
     """List available tools."""
     return [
         Tool(
             name="ping",
-            description="Health check - returns server status",
+            description="Health check - returns server status. Use to verify the MCP server is running. Returns: {status: 'ok', service: 'gofr-dig'}",
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
             name="hello_world",
-            description="Returns a greeting message",
+            description="Returns a greeting message. A simple test tool. Returns: {message: 'Hello, <name>!'}",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Optional name to greet",
+                        "description": "Name to greet. Defaults to 'World' if not provided.",
                     }
                 },
             },
         ),
         Tool(
             name="set_antidetection",
-            description="Configure anti-detection settings for web scraping. Settings persist for the session.",
+            description="""Configure anti-detection settings for web scraping. Call this BEFORE get_content or get_structure to customize scraping behavior. Settings persist for the session.
+
+PROFILES:
+- stealth: Maximum protection with browser-like headers. Use for sites with strict bot detection.
+- balanced: Good protection for most sites (default). Recommended starting point.
+- none: Minimal headers, fastest but easily detected. Use for APIs or permissive sites.
+- custom: Define your own headers and user agent.
+
+Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_delay: number}""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "profile": {
                         "type": "string",
                         "enum": ["stealth", "balanced", "none", "custom"],
-                        "description": "Anti-detection profile: 'stealth' (max protection), 'balanced' (default), 'none' (minimal headers), 'custom' (user-defined)",
+                        "description": "Anti-detection profile. Use 'balanced' for most sites, 'stealth' for sites with bot detection.",
                     },
                     "custom_headers": {
                         "type": "object",
-                        "description": "Custom headers to use when profile is 'custom'. Keys are header names, values are header values.",
+                        "description": "Custom headers when profile='custom'. Example: {\"Accept-Language\": \"en-US\"}",
                         "additionalProperties": {"type": "string"},
                     },
                     "custom_user_agent": {
                         "type": "string",
-                        "description": "Custom User-Agent string when profile is 'custom'",
+                        "description": "Custom User-Agent when profile='custom'. Example: 'Mozilla/5.0 (compatible; MyBot/1.0)'",
                     },
                     "respect_robots_txt": {
                         "type": "boolean",
-                        "description": "Whether to respect robots.txt rules (default: true)",
+                        "description": "Follow robots.txt rules (default: true). Set false to access disallowed paths (use responsibly).",
                     },
                     "rate_limit_delay": {
                         "type": "number",
-                        "description": "Delay in seconds between requests (default: 1.0)",
+                        "description": "Seconds to wait between requests (default: 1.0). Increase for rate-limited sites.",
                         "minimum": 0,
                     },
                 },
@@ -92,43 +147,56 @@ async def handle_list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_content",
-            description="Fetch a web page and extract its text content. Supports recursive crawling with depth parameter. Uses configured anti-detection settings.",
+            description="""Fetch a web page and extract its text content. Supports recursive crawling with depth parameter.
+
+USE CASES:
+- depth=1: Extract content from a single page (default)
+- depth=2: Extract from page AND pages it links to (great for documentation sites)
+- depth=3: Three levels deep (use sparingly, can be slow)
+
+RETURNS for depth=1: {success, url, title, text, language, links?, headings?, images?, meta?}
+RETURNS for depth>1: Same fields at root (from first page) PLUS {pages: [...], summary: {total_pages, total_text_length, pages_by_depth}}
+
+TIPS:
+- Use selector='#content' to focus on main content area
+- Set include_links=false if you only need text
+- Respects robots.txt and rate limits from set_antidetection""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The URL to fetch and extract content from",
+                        "description": "Full URL to fetch (must include http:// or https://)",
                     },
                     "depth": {
                         "type": "integer",
-                        "description": "Crawl depth: 1=single page (default), 2=follow internal links one level, 3=follow two levels. Max 3.",
+                        "description": "Crawl depth: 1=single page, 2=follow links once, 3=follow twice. Use 1 for single pages, 2-3 for documentation.",
                         "minimum": 1,
                         "maximum": 3,
                         "default": 1,
                     },
                     "max_pages_per_level": {
                         "type": "integer",
-                        "description": "Maximum pages to fetch per depth level (default: 5). Helps control crawl scope.",
+                        "description": "Max pages per depth level (default: 5, max: 20). Lower values = faster crawls.",
                         "minimum": 1,
                         "maximum": 20,
                         "default": 5,
                     },
                     "selector": {
                         "type": "string",
-                        "description": "Optional CSS selector to limit extraction to specific elements",
+                        "description": "CSS selector to extract specific elements. Examples: '#content', 'article', '.main-text'",
                     },
                     "include_links": {
                         "type": "boolean",
-                        "description": "Include links found in the content (default: true)",
+                        "description": "Include extracted links (default: true). Set false for text-only extraction.",
                     },
                     "include_images": {
                         "type": "boolean",
-                        "description": "Include images found in the content (default: false)",
+                        "description": "Include image URLs and alt text (default: false). Enable for image-heavy pages.",
                     },
                     "include_meta": {
                         "type": "boolean",
-                        "description": "Include page metadata (default: true)",
+                        "description": "Include page metadata like description, keywords, og:tags (default: true).",
                     },
                 },
                 "required": ["url"],
@@ -136,33 +204,44 @@ async def handle_list_tools() -> List[Tool]:
         ),
         Tool(
             name="get_structure",
-            description="Analyze the structure of a web page. Returns semantic sections, navigation, links, forms, and document outline.",
+            description="""Analyze the structure of a web page WITHOUT extracting all text content. Use this to understand page layout before deciding what to extract with get_content.
+
+RETURNS: {success, url, title, language, sections: [...], navigation?: [...], internal_links?: [...], external_links?: [...], forms?: [...], outline?: [...]}
+
+USE get_structure WHEN:
+- You need to find the right CSS selector for get_content
+- You want to understand page organization before crawling
+- You need to find forms, navigation, or specific sections
+
+USE get_content WHEN:
+- You need the actual text content
+- You want to extract and process page text""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The URL to analyze",
+                        "description": "Full URL to analyze (must include http:// or https://)",
                     },
                     "include_navigation": {
                         "type": "boolean",
-                        "description": "Include navigation links (default: true)",
+                        "description": "Include navigation menus and their links (default: true)",
                     },
                     "include_internal_links": {
                         "type": "boolean",
-                        "description": "Include internal links (default: true)",
+                        "description": "Include links to same domain (default: true)",
                     },
                     "include_external_links": {
                         "type": "boolean",
-                        "description": "Include external links (default: true)",
+                        "description": "Include links to other domains (default: true)",
                     },
                     "include_forms": {
                         "type": "boolean",
-                        "description": "Include form analysis (default: true)",
+                        "description": "Include form fields and actions (default: true)",
                     },
                     "include_outline": {
                         "type": "boolean",
-                        "description": "Include document outline/headings (default: true)",
+                        "description": "Include heading hierarchy h1-h6 (default: true)",
                     },
                 },
                 "required": ["url"],
@@ -192,7 +271,7 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
     if name == "get_structure":
         return await _handle_get_structure(arguments)
 
-    return [_json_text({"error": f"Unknown tool: {name}"})]
+    return _error_response("UNKNOWN_TOOL", f"Unknown tool: {name}", {"tool_name": name})
 
 
 async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -208,14 +287,11 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
         profile = AntiDetectionProfile(profile_str)
     except ValueError:
         valid_profiles = [p.value for p in AntiDetectionProfile]
-        return [
-            _json_text(
-                {
-                    "error": f"Invalid profile: {profile_str}",
-                    "valid_profiles": valid_profiles,
-                }
-            )
-        ]
+        return _error_response(
+            "INVALID_PROFILE",
+            f"Invalid profile: {profile_str}",
+            {"valid_profiles": valid_profiles},
+        )
 
     # Get the global scraping state
     state = get_scraping_state()
@@ -231,7 +307,11 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
     if "rate_limit_delay" in arguments:
         delay = arguments["rate_limit_delay"]
         if delay < 0:
-            return [_json_text({"error": "rate_limit_delay must be non-negative"})]
+            return _error_response(
+                "INVALID_RATE_LIMIT",
+                "rate_limit_delay must be non-negative",
+                {"provided_value": delay},
+            )
         state.rate_limit_delay = delay
 
     # Create manager to get profile info
@@ -271,10 +351,11 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
     url = arguments.get("url")
     if not url:
-        return [_json_text({"success": False, "error": "url is required"})]
+        return _error_response("INVALID_URL", "url is required")
 
-    depth = min(arguments.get("depth", 1), 3)  # Cap at 3
-    max_pages_per_level = min(arguments.get("max_pages_per_level", 5), 20)
+    # Validate and clamp depth (1-3) and max_pages_per_level (1-20)
+    depth = max(1, min(arguments.get("depth", 1), 3))
+    max_pages_per_level = max(1, min(arguments.get("max_pages_per_level", 5), 20))
     selector = arguments.get("selector")
     include_links = arguments.get("include_links", True)
     include_images = arguments.get("include_images", False)
@@ -503,7 +584,7 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     """
     url = arguments.get("url")
     if not url:
-        return [_json_text({"success": False, "error": "url is required"})]
+        return _error_response("INVALID_URL", "url is required")
 
     # Check robots.txt if enabled
     state = get_scraping_state()
@@ -513,16 +594,11 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
         checker = get_robots_checker()
         allowed, reason = await checker.is_allowed(url)
         if not allowed:
-            return [
-                _json_text(
-                    {
-                        "success": False,
-                        "error": f"Access denied: {reason}",
-                        "url": url,
-                        "robots_blocked": True,
-                    }
-                )
-            ]
+            return _error_response(
+                "ROBOTS_BLOCKED",
+                f"Access denied: {reason}",
+                {"url": url},
+            )
 
     include_navigation = arguments.get("include_navigation", True)
     include_internal_links = arguments.get("include_internal_links", True)
@@ -533,16 +609,11 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     # Fetch the URL
     fetch_result = await fetch_url(url)
     if not fetch_result.success:
-        return [
-            _json_text(
-                {
-                    "success": False,
-                    "error": f"Failed to fetch URL: {fetch_result.error}",
-                    "url": url,
-                    "status_code": fetch_result.status_code,
-                }
-            )
-        ]
+        return _error_response(
+            "FETCH_ERROR",
+            f"Failed to fetch URL: {fetch_result.error}",
+            {"url": url, "status_code": fetch_result.status_code},
+        )
 
     # Analyze structure
     from app.scraping.structure import StructureAnalyzer
@@ -551,15 +622,11 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     structure = analyzer.analyze(fetch_result.content, url=fetch_result.url)
 
     if not structure.success:
-        return [
-            _json_text(
-                {
-                    "success": False,
-                    "error": structure.error,
-                    "url": url,
-                }
-            )
-        ]
+        return _error_response(
+            "EXTRACTION_ERROR",
+            structure.error or "Failed to analyze page structure",
+            {"url": url},
+        )
 
     # Build response
     response = {

@@ -1,12 +1,13 @@
 """HTTP fetcher with anti-detection support.
 
 This module provides async HTTP fetching with configurable anti-detection
-headers and rate limiting.
+headers, rate limiting, and retry logic with exponential backoff.
 """
 
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass
 from typing import Dict, Optional
 from urllib.parse import urlparse
@@ -16,6 +17,13 @@ import aiohttp
 from app.logger import session_logger as logger
 from app.scraping.antidetection import AntiDetectionManager
 from app.scraping.state import get_scraping_state
+
+
+# Retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_BASE_DELAY = 1.0  # seconds
+DEFAULT_MAX_DELAY = 30.0  # seconds
+RETRY_STATUS_CODES = {429, 500, 502, 503, 504}  # Status codes that trigger retry
 
 
 @dataclass
@@ -30,6 +38,8 @@ class FetchResult:
         headers: Response headers
         encoding: Character encoding used
         error: Error message if fetch failed
+        retry_count: Number of retries performed
+        rate_limited: True if rate limited (429) was encountered
     """
 
     url: str
@@ -39,6 +49,8 @@ class FetchResult:
     headers: Optional[Dict[str, str]] = None
     encoding: str = "utf-8"
     error: Optional[str] = None
+    retry_count: int = 0
+    rate_limited: bool = False
 
     @property
     def success(self) -> bool:
@@ -47,10 +59,11 @@ class FetchResult:
 
 
 class HTTPFetcher:
-    """Async HTTP fetcher with anti-detection support.
+    """Async HTTP fetcher with anti-detection support and retry logic.
 
     This fetcher uses the global scraping state to determine anti-detection
-    settings and rate limiting.
+    settings and rate limiting. Includes exponential backoff for retries
+    and respects Retry-After headers for 429 responses.
 
     Example:
         fetcher = HTTPFetcher()
@@ -63,15 +76,24 @@ class HTTPFetcher:
         self,
         timeout: float = 30.0,
         max_redirects: int = 10,
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        base_delay: float = DEFAULT_BASE_DELAY,
+        max_delay: float = DEFAULT_MAX_DELAY,
     ):
         """Initialize the HTTP fetcher.
 
         Args:
             timeout: Request timeout in seconds
             max_redirects: Maximum number of redirects to follow
+            max_retries: Maximum number of retry attempts for transient failures
+            base_delay: Base delay for exponential backoff (seconds)
+            max_delay: Maximum delay between retries (seconds)
         """
         self.timeout = timeout
         self.max_redirects = max_redirects
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
         self._last_request_time: Dict[str, float] = {}  # domain -> timestamp
 
     def _get_manager(self) -> AntiDetectionManager:
@@ -82,6 +104,63 @@ class HTTPFetcher:
             custom_headers=state.custom_headers,
             custom_user_agent=state.custom_user_agent,
         )
+
+    def _calculate_backoff(self, attempt: int, retry_after: Optional[int] = None) -> float:
+        """Calculate backoff delay for retry.
+
+        Uses exponential backoff with jitter. If a Retry-After header is provided,
+        uses that value instead.
+
+        Args:
+            attempt: Current retry attempt (0-indexed)
+            retry_after: Optional Retry-After header value in seconds
+
+        Returns:
+            Delay in seconds before next retry
+        """
+        if retry_after is not None:
+            # Respect server's Retry-After header, with a cap
+            return min(retry_after, self.max_delay)
+
+        # Exponential backoff with jitter: base * 2^attempt + random jitter
+        delay = self.base_delay * (2 ** attempt)
+        jitter = random.uniform(0, self.base_delay)
+        return min(delay + jitter, self.max_delay)
+
+    def _parse_retry_after(self, headers: Dict[str, str]) -> Optional[int]:
+        """Parse Retry-After header value.
+
+        Args:
+            headers: Response headers
+
+        Returns:
+            Retry delay in seconds, or None if not present/parseable
+        """
+        retry_after = headers.get("Retry-After")
+        if retry_after is None:
+            return None
+
+        try:
+            # Try parsing as integer (seconds)
+            return int(retry_after)
+        except ValueError:
+            # Could be HTTP-date format, but we'll just use default backoff
+            logger.debug("Could not parse Retry-After header", value=retry_after)
+            return None
+
+    def _should_retry(self, status_code: int, attempt: int) -> bool:
+        """Determine if a request should be retried.
+
+        Args:
+            status_code: HTTP status code from response
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            True if request should be retried
+        """
+        if attempt >= self.max_retries:
+            return False
+        return status_code in RETRY_STATUS_CODES
 
     async def _rate_limit(self, url: str) -> None:
         """Apply rate limiting based on domain.
@@ -115,7 +194,10 @@ class HTTPFetcher:
         rotate_user_agent: bool = False,
         additional_headers: Optional[Dict[str, str]] = None,
     ) -> FetchResult:
-        """Fetch a URL with anti-detection headers.
+        """Fetch a URL with anti-detection headers and retry logic.
+
+        Implements exponential backoff with jitter for transient failures.
+        Respects Retry-After headers for 429 responses.
 
         Args:
             url: The URL to fetch
@@ -148,75 +230,127 @@ class HTTPFetcher:
 
         logger.debug("Fetching URL", url=url, headers=list(headers.keys()))
 
-        try:
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            connector = aiohttp.TCPConnector(
-                limit=10,
-                enable_cleanup_closed=True,
-            )
+        attempt = 0
+        last_error: Optional[str] = None
+        rate_limited = False
 
-            async with aiohttp.ClientSession(
-                timeout=timeout,
-                connector=connector,
-            ) as session:
-                async with session.get(
-                    url,
-                    headers=headers,
-                    max_redirects=self.max_redirects,
-                    allow_redirects=True,
-                ) as response:
-                    # Detect encoding
-                    encoding = response.charset or "utf-8"
+        while True:
+            try:
+                timeout = aiohttp.ClientTimeout(total=self.timeout)
+                connector = aiohttp.TCPConnector(
+                    limit=10,
+                    enable_cleanup_closed=True,
+                )
 
-                    # Read content
-                    content = await response.text(encoding=encoding)
+                async with aiohttp.ClientSession(
+                    timeout=timeout,
+                    connector=connector,
+                ) as session:
+                    async with session.get(
+                        url,
+                        headers=headers,
+                        max_redirects=self.max_redirects,
+                        allow_redirects=True,
+                    ) as response:
+                        # Check if we should retry
+                        if self._should_retry(response.status, attempt):
+                            response_headers = dict(response.headers)
+                            retry_after = self._parse_retry_after(response_headers)
+                            backoff = self._calculate_backoff(attempt, retry_after)
 
-                    # Get content type
-                    content_type = response.headers.get("Content-Type")
+                            if response.status == 429:
+                                rate_limited = True
+                                logger.warning(
+                                    "Rate limited (429), retrying",
+                                    url=url,
+                                    attempt=attempt + 1,
+                                    retry_after=retry_after,
+                                    backoff=backoff,
+                                )
+                            else:
+                                logger.warning(
+                                    "Server error, retrying",
+                                    url=url,
+                                    status=response.status,
+                                    attempt=attempt + 1,
+                                    backoff=backoff,
+                                )
 
-                    # Convert headers to dict
-                    response_headers = dict(response.headers)
+                            await asyncio.sleep(backoff)
+                            attempt += 1
+                            continue
 
-                    logger.info(
-                        "Fetch completed",
+                        # Detect encoding
+                        encoding = response.charset or "utf-8"
+
+                        # Read content
+                        content = await response.text(encoding=encoding)
+
+                        # Get content type
+                        content_type = response.headers.get("Content-Type")
+
+                        # Convert headers to dict
+                        response_headers = dict(response.headers)
+
+                        logger.info(
+                            "Fetch completed",
+                            url=url,
+                            status=response.status,
+                            content_length=len(content),
+                            retries=attempt,
+                        )
+
+                        return FetchResult(
+                            url=str(response.url),  # Final URL after redirects
+                            status_code=response.status,
+                            content=content,
+                            content_type=content_type,
+                            headers=response_headers,
+                            encoding=encoding,
+                            retry_count=attempt,
+                            rate_limited=rate_limited,
+                        )
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_error = str(e)
+                if attempt < self.max_retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "Fetch error, retrying",
                         url=url,
-                        status=response.status,
-                        content_length=len(content),
+                        error=last_error,
+                        attempt=attempt + 1,
+                        backoff=backoff,
                     )
-
+                    await asyncio.sleep(backoff)
+                    attempt += 1
+                    continue
+                else:
+                    logger.error(
+                        "Fetch failed after retries",
+                        url=url,
+                        error=last_error,
+                        attempts=attempt + 1,
+                    )
                     return FetchResult(
-                        url=str(response.url),  # Final URL after redirects
-                        status_code=response.status,
-                        content=content,
-                        content_type=content_type,
-                        headers=response_headers,
-                        encoding=encoding,
+                        url=url,
+                        status_code=0,
+                        content="",
+                        error=f"HTTP error after {attempt + 1} attempts: {last_error}",
+                        retry_count=attempt,
+                        rate_limited=rate_limited,
                     )
 
-        except aiohttp.ClientError as e:
-            logger.error("Fetch failed", url=url, error=str(e))
-            return FetchResult(
-                url=url,
-                status_code=0,
-                content="",
-                error=f"HTTP error: {str(e)}",
-            )
-        except asyncio.TimeoutError:
-            logger.error("Fetch timeout", url=url, timeout=self.timeout)
-            return FetchResult(
-                url=url,
-                status_code=0,
-                content="",
-                error=f"Request timed out after {self.timeout} seconds",
-            )
-        except Exception as e:
-            logger.error("Unexpected fetch error", url=url, error=str(e))
-            return FetchResult(
-                url=url,
-                status_code=0,
-                content="",
-                error=f"Unexpected error: {str(e)}",
-            )
+            except Exception as e:
+                logger.error("Unexpected fetch error", url=url, error=str(e))
+                return FetchResult(
+                    url=url,
+                    status_code=0,
+                    content="",
+                    error=f"Unexpected error: {str(e)}",
+                    retry_count=attempt,
+                    rate_limited=rate_limited,
+                )
 
 
 # Global fetcher instance

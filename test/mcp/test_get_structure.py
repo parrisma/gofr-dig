@@ -345,8 +345,9 @@ class TestGetStructureMCPTool:
         result = await handle_call_tool("get_structure", {"url": url})
 
         data = get_mcp_result_data(result)
-        assert "error" in data
-        assert data.get("status_code") == 404
+        assert data["success"] is False
+        assert data["error_code"] == "FETCH_ERROR"
+        assert data["details"]["status_code"] == 404
 
     @pytest.mark.asyncio
     async def test_tool_is_listed(self):

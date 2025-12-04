@@ -11,6 +11,7 @@ from app.exceptions import (
     ResourceNotFoundError,
     SecurityError,
 )
+from app.logger import session_logger as logger
 
 try:
     from app.validation.document_models import ErrorResponse  # type: ignore[import-not-found]
@@ -46,10 +47,14 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     # Anti-detection errors
     "INVALID_PROFILE": "Use one of: 'stealth', 'balanced', 'none', or 'custom' for anti-detection profile.",
     "INVALID_HEADERS": "Custom headers must be a dictionary with string keys and values.",
+    "INVALID_RATE_LIMIT": "rate_limit_delay must be a non-negative number (seconds between requests).",
     
     # Crawl errors
     "MAX_DEPTH_EXCEEDED": "Crawl depth is limited to 3. Use depth=1, 2, or 3.",
     "MAX_PAGES_EXCEEDED": "Too many pages requested. Reduce max_pages_per_level (max 20).",
+    
+    # Tool errors
+    "UNKNOWN_TOOL": "Available tools: ping, hello_world, set_antidetection, get_content, get_structure.",
     
     # Configuration errors
     "CONFIGURATION_ERROR": "Check server configuration. Contact administrator if issue persists.",
@@ -137,6 +142,11 @@ def error_to_mcp_response(error: GofrDigError) -> Dict[str, Any]:
         Dictionary suitable for MCP tool response
     """
     response = create_error_response(error)
+    logger.debug(
+        "Mapped error to MCP response",
+        error_code=response.error_code,  # type: ignore[attr-defined]
+        error_type=type(error).__name__,
+    )
     return {
         "success": False,
         "error_code": response.error_code,  # type: ignore[attr-defined]

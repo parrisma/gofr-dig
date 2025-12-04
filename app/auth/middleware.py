@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.auth.service import AuthService, TokenInfo
+from app.logger import session_logger as logger
 
 # Global auth service instance
 _auth_service: Optional[AuthService] = None
@@ -30,6 +31,7 @@ def init_auth_service(
     """
     global _auth_service
     _auth_service = AuthService(secret_key=secret_key, token_store_path=token_store_path)
+    logger.info("Auth service initialized", token_store=token_store_path)
     return _auth_service
 
 
@@ -64,10 +66,13 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
     try:
         auth_service = get_auth_service()
         token_info = auth_service.verify_token(credentials.credentials)
+        logger.debug("Token verified", group=token_info.group)
         return token_info
     except ValueError as e:
+        logger.warning("Token verification failed", error=str(e))
         raise HTTPException(status_code=401, detail=str(e))
     except RuntimeError as e:
+        logger.error("Auth service error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -88,14 +93,18 @@ def optional_verify_token(
     """
     if credentials is None:
         # No token provided, return None (anonymous access)
+        logger.debug("Anonymous access - no token provided")
         return None
 
     try:
         auth_service = get_auth_service()
         token_info = auth_service.verify_token(credentials.credentials)
+        logger.debug("Optional token verified", group=token_info.group)
         return token_info
     except ValueError as e:
+        logger.warning("Optional token verification failed", error=str(e))
         raise HTTPException(status_code=401, detail=str(e))
     except RuntimeError:
         # Auth service not initialized - allow anonymous access
+        logger.debug("Auth service not initialized - allowing anonymous access")
         return None

@@ -396,8 +396,9 @@ class TestRobotsComplianceInTools:
         result = await handle_call_tool("get_structure", {"url": url})
 
         data = get_mcp_result_data(result)
-        assert "error" in data
-        assert data.get("robots_blocked") is True
+        assert data["success"] is False
+        assert data["error_code"] == "ROBOTS_BLOCKED"
+        assert "recovery_strategy" in data
 
     @pytest.mark.asyncio
     async def test_set_antidetection_controls_robots(self, html_fixture_server):
