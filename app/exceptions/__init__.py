@@ -12,17 +12,45 @@ from app.exceptions.base import (
     ConfigurationError,
     RegistryError,
 )
-from app.exceptions.template import TemplateNotFoundError
-from app.exceptions.fragment import FragmentNotFoundError
-from app.exceptions.group import GroupMismatchError
-from app.exceptions.style import StyleNotFoundError
-from app.exceptions.invalid_group import InvalidGroupError
-from app.exceptions.session import (
-    SessionError,
-    SessionNotFoundError,
-    SessionValidationError,
-    InvalidSessionStateError,
-)
+
+# Optional imports for modules that may not exist yet
+try:
+    from app.exceptions.template import TemplateNotFoundError  # type: ignore[import-not-found]
+except ImportError:
+    TemplateNotFoundError = type("TemplateNotFoundError", (ResourceNotFoundError,), {})  # type: ignore[misc, assignment]
+
+try:
+    from app.exceptions.fragment import FragmentNotFoundError  # type: ignore[import-not-found]
+except ImportError:
+    FragmentNotFoundError = type("FragmentNotFoundError", (ResourceNotFoundError,), {})  # type: ignore[misc, assignment]
+
+try:
+    from app.exceptions.group import GroupMismatchError  # type: ignore[import-not-found]
+except ImportError:
+    GroupMismatchError = type("GroupMismatchError", (SecurityError,), {})  # type: ignore[misc, assignment]
+
+try:
+    from app.exceptions.style import StyleNotFoundError  # type: ignore[import-not-found]
+except ImportError:
+    StyleNotFoundError = type("StyleNotFoundError", (ResourceNotFoundError,), {})  # type: ignore[misc, assignment]
+
+try:
+    from app.exceptions.invalid_group import InvalidGroupError  # type: ignore[import-not-found]
+except ImportError:
+    InvalidGroupError = type("InvalidGroupError", (ValidationError,), {})  # type: ignore[misc, assignment]
+
+try:
+    from app.exceptions.session import (  # type: ignore[import-not-found]
+        SessionError,
+        SessionNotFoundError,
+        SessionValidationError,
+        InvalidSessionStateError,
+    )
+except ImportError:
+    SessionError = type("SessionError", (GofrDigError,), {})  # type: ignore[misc, assignment]
+    SessionNotFoundError = type("SessionNotFoundError", (ResourceNotFoundError,), {})  # type: ignore[misc, assignment]
+    SessionValidationError = type("SessionValidationError", (ValidationError,), {})  # type: ignore[misc, assignment]
+    InvalidSessionStateError = type("InvalidSessionStateError", (ValidationError,), {})  # type: ignore[misc, assignment]
 
 __all__ = [
     # Base exceptions

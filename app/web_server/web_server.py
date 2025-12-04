@@ -1,6 +1,5 @@
 """GOFR-DIG Web Server - Minimal stub implementation for testing."""
 
-import json
 from typing import Optional, Any
 
 from starlette.applications import Starlette
@@ -10,7 +9,6 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from app.auth import AuthService
-from app.logger import session_logger as logger
 
 
 class GofrDigWebServer:

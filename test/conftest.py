@@ -238,9 +238,9 @@ try:
     from pathlib import Path
 
     sys.path.insert(0, str(Path(__file__).parent))
-    from test_server_manager import ServerManager
+    from test_server_manager import ServerManager  # type: ignore[import-not-found]
 except (ImportError, ModuleNotFoundError):
-    ServerManager = None
+    ServerManager = None  # type: ignore[misc, assignment]
 
 
 @pytest.fixture(scope="session")
@@ -318,9 +318,120 @@ def image_server():
     if str(test_dir) not in sys.path:
         sys.path.insert(0, str(test_dir))
 
-    from mock.image_server import ImageServer
+    from mock.image_server import ImageServer  # type: ignore[import-not-found]
 
     server = ImageServer(port=8765)
+    server.start()
+
+    yield server
+
+    server.stop()
+
+
+# ============================================================================
+# HTML FIXTURE SERVER FOR SCRAPING TESTS
+# ============================================================================
+
+
+class HTMLFixtureServer:
+    """Simple HTTP server for serving HTML test fixtures."""
+
+    def __init__(self, port: int = 8766):
+        self.port = port
+        self._server = None
+        self._thread = None
+        self._fixtures_dir = Path(__file__).parent / "fixtures" / "html"
+
+    def start(self):
+        """Start the HTTP server in a background thread."""
+        import http.server
+        import threading
+
+        # Capture fixtures_dir in closure for the nested Handler class
+        fixtures_dir = self._fixtures_dir
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def __init__(handler_self, *args, directory=None, **kwargs):  # noqa: ARG002, N805
+                super().__init__(*args, directory=str(fixtures_dir), **kwargs)  # type: ignore[arg-type]
+
+            def log_message(handler_self, format, *args):  # noqa: A002, ARG002, N805
+                pass  # Suppress logging
+
+        self._server = http.server.HTTPServer(("127.0.0.1", self.port), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        """Stop the HTTP server."""
+        if self._server:
+            self._server.shutdown()
+            self._server = None
+        if self._thread:
+            self._thread.join(timeout=5)
+            self._thread = None
+
+    def get_url(self, path: str = "") -> str:
+        """Get the full URL for a path on this server."""
+        path = path.lstrip("/")
+        return f"http://127.0.0.1:{self.port}/{path}"
+
+    @property
+    def base_url(self) -> str:
+        """Get the base URL of the server."""
+        return f"http://127.0.0.1:{self.port}"
+
+
+@pytest.fixture(scope="function")
+def html_fixture_server():
+    """
+    Provide a lightweight HTTP server for serving HTML test fixtures.
+
+    The server serves files from test/fixtures/html directory on port 8766.
+    Use html_fixture_server.get_url(path) to get the full URL for a test page.
+
+    Available pages:
+    - index.html - Home page with navigation
+    - products.html - Product listing
+    - product-detail.html - Product detail page
+    - about.html - About page
+    - contact.html - Contact form
+    - blog/index.html - Blog listing
+    - blog/post-1.html - Blog post with multilingual content
+    - chinese.html - Full Chinese content
+    - japanese.html - Full Japanese content
+    - external-links.html - Page with external links
+    - script-heavy.html - JavaScript-heavy dashboard
+    - robots.txt - Robots exclusion file
+
+    Usage:
+        def test_scrape_page(html_fixture_server):
+            url = html_fixture_server.get_url("products.html")
+            # url is "http://127.0.0.1:8766/products.html"
+            # Make requests to this URL
+
+    Returns:
+        HTMLFixtureServer: Server instance with start(), stop(), get_url(), and base_url
+    """
+    server = HTMLFixtureServer(port=8766)
+    server.start()
+
+    yield server
+
+    server.stop()
+
+
+@pytest.fixture(scope="session")
+def html_fixture_server_session():
+    """
+    Session-scoped HTML fixture server for tests that need persistent server.
+
+    Same as html_fixture_server but lives for the entire test session.
+    Uses port 8767 to avoid conflicts with function-scoped fixture.
+
+    Returns:
+        HTMLFixtureServer: Server instance
+    """
+    server = HTMLFixtureServer(port=8767)
     server.start()
 
     yield server

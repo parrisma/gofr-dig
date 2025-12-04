@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Dashboard - ACME Corp</title>
+    <link rel="stylesheet" href="/styles/main.css">
+    <link rel="stylesheet" href="/styles/dashboard.css">
+    <link rel="stylesheet" href="https://cdn.example.com/libs/charts.css">
+    <script src="https://cdn.example.com/libs/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.example.com/libs/charts.js" defer></script>
+    <script>
+        // Inline configuration
+        window.ACME_CONFIG = {
+            apiEndpoint: '/api/v1',
+            refreshInterval: 30000,
+            theme: 'light'
+        };
+    </script>
+    <style>
+        .dashboard-widget {
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 10px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        }
+        .metric-value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        .chart-container {
+            width: 100%;
+            height: 300px;
+        }
+        @media (max-width: 768px) {
+            .dashboard-widget { width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <nav id="main-nav">
+        <ul>
+            <li><a href="/">Home</a></li>
+            <li><a href="/products.html">Products</a></li>
+            <li><a href="/about.html">About</a></li>
+            <li><a href="/contact.html">Contact</a></li>
+        </ul>
+    </nav>
+
+    <main id="content">
+        <h1>Interactive Dashboard</h1>
+        
+        <div id="dashboard-container">
+            <section class="dashboard-widget" id="sales-widget">
+                <h2>Sales Overview</h2>
+                <div class="metric-value" id="total-sales">$0</div>
+                <p>Total sales this quarter</p>
+                <div class="chart-container" id="sales-chart"></div>
+            </section>
+
+            <section class="dashboard-widget" id="users-widget">
+                <h2>Active Users</h2>
+                <div class="metric-value" id="active-users">0</div>
+                <p>Currently online</p>
+                <canvas id="users-chart" width="400" height="200"></canvas>
+            </section>
+
+            <section class="dashboard-widget" id="performance-widget">
+                <h2>System Performance</h2>
+                <div class="metric-value" id="uptime">99.9%</div>
+                <p>Service uptime</p>
+                <svg id="performance-gauge" width="200" height="200">
+                    <circle cx="100" cy="100" r="80" fill="none" stroke="#e0e0e0" stroke-width="20"/>
+                    <circle cx="100" cy="100" r="80" fill="none" stroke="#2ecc71" stroke-width="20" 
+                            stroke-dasharray="502" stroke-dashoffset="5" transform="rotate(-90 100 100)"/>
+                </svg>
+            </section>
+
+            <section class="dashboard-widget" id="notifications-widget">
+                <h2>Recent Notifications</h2>
+                <ul id="notification-list">
+                    <li class="notification info">System maintenance scheduled for Sunday</li>
+                    <li class="notification success">New feature deployment completed</li>
+                    <li class="notification warning">High traffic detected on API endpoints</li>
+                </ul>
+            </section>
+        </div>
+
+        <section id="data-table-section">
+            <h2>Recent Transactions</h2>
+            <table id="transactions-table" class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Date</th>
+                        <th>Customer</th>
+                        <th>Product</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="transactions-body">
+                    <!-- Data loaded via JavaScript -->
+                </tbody>
+            </table>
+        </section>
+
+        <noscript>
+            <div class="noscript-warning">
+                <h2>JavaScript Required</h2>
+                <p>This dashboard requires JavaScript to function properly. Please enable JavaScript in your browser settings.</p>
+                <p>Basic content is still available:</p>
+                <ul>
+                    <li>Total Sales: $1,234,567</li>
+                    <li>Active Users: 5,432</li>
+                    <li>System Uptime: 99.9%</li>
+                </ul>
+            </div>
+        </noscript>
+    </main>
+
+    <footer>
+        <p>&copy; 2024 ACME Corporation. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // Dashboard initialization
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeDashboard();
+            loadTransactionData();
+            setupRefreshInterval();
+        });
+
+        function initializeDashboard() {
+            // Simulated data loading
+            document.getElementById('total-sales').textContent = '$1,234,567';
+            document.getElementById('active-users').textContent = '5,432';
+        }
+
+        function loadTransactionData() {
+            const transactions = [
+                { id: 'TXN-001', date: '2024-01-15', customer: 'John Smith', product: 'Widget Pro 3000', amount: '$299.99', status: 'Completed' },
+                { id: 'TXN-002', date: '2024-01-15', customer: 'Jane Doe', product: 'Gadget Plus', amount: '$149.99', status: 'Processing' },
+                { id: 'TXN-003', date: '2024-01-14', customer: 'Bob Wilson', product: 'ACME Suite Pro', amount: '$999.00', status: 'Completed' }
+            ];
+            
+            const tbody = document.getElementById('transactions-body');
+            transactions.forEach(function(txn) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td>' + txn.id + '</td><td>' + txn.date + '</td><td>' + txn.customer + '</td><td>' + txn.product + '</td><td>' + txn.amount + '</td><td>' + txn.status + '</td>';
+                tbody.appendChild(row);
+            });
+        }
+
+        function setupRefreshInterval() {
+            setInterval(function() {
+                console.log('Refreshing dashboard data...');
+                // Simulated refresh
+            }, window.ACME_CONFIG.refreshInterval);
+        }
+
+        // Analytics tracking (simulated)
+        (function() {
+            window.acmeAnalytics = {
+                track: function(event, data) {
+                    console.log('Analytics:', event, data);
+                }
+            };
+            window.acmeAnalytics.track('page_view', { page: 'dashboard' });
+        })();
+    </script>
+    <script src="/scripts/analytics.js" async></script>
+    <script src="/scripts/dashboard-widgets.js" defer></script>
+</body>
+</html>

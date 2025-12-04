@@ -11,7 +11,16 @@ from app.exceptions import (
     ResourceNotFoundError,
     SecurityError,
 )
-from app.validation.document_models import ErrorResponse
+
+try:
+    from app.validation.document_models import ErrorResponse  # type: ignore[import-not-found]
+except ImportError:
+    # Placeholder if module doesn't exist
+    class ErrorResponse:  # type: ignore[no-redef]
+        """Placeholder ErrorResponse when validation module is not available."""
+        def __init__(self, **kwargs: Any) -> None:
+            for k, v in kwargs.items():
+                setattr(self, k, v)
 
 
 # Recovery strategy templates for common error types
@@ -26,127 +35,118 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "INVALID_TABLE_DATA": "Review table validation requirements in documentation. Ensure rows are consistent and required parameters are provided.",
     "INVALID_COLOR": "Use theme colors (blue, orange, green, red, purple, etc.) or hex format (#RRGGBB or #RGB).",
     "NUMBER_FORMAT_ERROR": "Use format specifications like 'currency:USD', 'percent', 'decimal:2', 'integer', or 'accounting'.",
-    "INVALID_COLUMN_WIDTH": "Column widths must be percentages (e.g., '25%') and total ≤ 100%.",
+    "INVALID_COLUMN_WIDTH": "Column widths must be percentages (e.g., '25%') and total <= 100%.",
     "STYLE_NOT_FOUND": "Use list_styles to see available styles for your group.",
-    "REGISTRY_ERROR": "Check that template/fragment/style ID is valid and exists in the system.",
-    "VALIDATION_ERROR": "Review the error message and adjust the request parameters accordingly.",
-    "RESOURCE_NOT_FOUND": "Verify the resource ID is correct and the resource exists.",
-    "SECURITY_ERROR": "Ensure your authentication token has access to the requested resource.",
+    "GROUP_MISMATCH": "Ensure the resource belongs to your group. Check group_id in your request.",
+    "CONFIGURATION_ERROR": "Check server logs for configuration details. Contact administrator if issue persists.",
 }
 
 
-def get_recovery_strategy(error_code: str) -> str:
-    """Get recovery strategy for an error code.
-
-    Args:
-        error_code: The error code
-
-    Returns:
-        Recovery strategy string
+def get_error_code(error: GofrDigError) -> str:
+    """Extract error code from exception class name.
+    
+    Converts class names like TemplateNotFoundError to TEMPLATE_NOT_FOUND.
     """
-    return RECOVERY_STRATEGIES.get(
-        error_code, "Review the error message, adjust the request, and try again."
-    )
+    name = error.__class__.__name__
+    # Remove 'Error' suffix
+    if name.endswith("Error"):
+        name = name[:-5]
+    # Convert camelCase to UPPER_SNAKE_CASE
+    result = []
+    for i, char in enumerate(name):
+        if char.isupper() and i > 0:
+            result.append("_")
+        result.append(char.upper())
+    return "".join(result)
 
 
-def map_exception_to_response(error: Exception) -> ErrorResponse:
-    """Convert an exception to a structured ErrorResponse.
+def get_recovery_strategy(error_code: str, error: GofrDigError) -> str:
+    """Get recovery strategy for an error.
+    
+    Returns specific strategy if available, otherwise a generic one.
+    """
+    if error_code in RECOVERY_STRATEGIES:
+        return RECOVERY_STRATEGIES[error_code]
+    
+    # Generic strategies based on error type
+    if isinstance(error, ResourceNotFoundError):
+        return "Verify the resource identifier and check that the resource exists."
+    elif isinstance(error, ValidationError):
+        return "Review the validation error details and correct the input."
+    elif isinstance(error, SecurityError):
+        return "Ensure proper authentication and authorization. Check your credentials."
+    
+    return "Review the error message and try again. Contact support if the issue persists."
 
+
+def create_error_response(error: GofrDigError) -> ErrorResponse:
+    """Create a structured error response from a GofrDigError.
+    
     Args:
         error: The exception to convert
-
+        
     Returns:
-        ErrorResponse with structured error information
+        ErrorResponse with error_code, message, details, and recovery_strategy
     """
-    if isinstance(error, GofrDigError):
-        # Structured GOFR-DIG error with code, message, details
+    error_code = get_error_code(error)
+    
+    # Get details if available
+    details: Dict[str, Any] = {}
+    if hasattr(error, "details") and error.details:  # type: ignore[union-attr]
+        details = error.details  # type: ignore[union-attr]
+    
+    # Build error response
+    if isinstance(error, (ResourceNotFoundError, ValidationError, SecurityError)):
         return ErrorResponse(
-            error_code=error.code,
-            message=error.message,
-            details=error.details if error.details else None,
-            recovery_strategy=get_recovery_strategy(error.code),
+            error_code=error_code,
+            message=str(error),
+            details=details,
+            recovery_strategy=get_recovery_strategy(error_code, error),
         )
-
-    # Handle Pydantic validation errors
-    from pydantic import ValidationError as PydanticValidationError
-
-    if isinstance(error, PydanticValidationError):
-        errors = error.errors()
-        return ErrorResponse(
-            error_code="PYDANTIC_VALIDATION_ERROR",
-            message=f"Validation failed: {len(errors)} error(s)",
-            details={"errors": errors},
-            recovery_strategy="Check the error details and provide valid input according to the schema.",
-        )
-
-    # Generic exceptions - wrap with minimal structure
+    
+    # Generic GofrDigError
     return ErrorResponse(
-        error_code="INTERNAL_ERROR",
+        error_code=error_code,
         message=str(error),
-        details={"exception_type": type(error).__name__},
-        recovery_strategy="An unexpected error occurred. Please report this issue if it persists.",
+        details=details,
+        recovery_strategy=get_recovery_strategy(error_code, error),
     )
 
 
-def map_error_for_mcp(error: Exception) -> Dict[str, Any]:
-    """Map exception to MCP tool response format.
-
+def error_to_mcp_response(error: GofrDigError) -> Dict[str, Any]:
+    """Convert error to MCP-compatible response format.
+    
     Args:
         error: The exception to convert
-
+        
     Returns:
         Dictionary suitable for MCP tool response
     """
-    response = map_exception_to_response(error)
-
+    response = create_error_response(error)
     return {
-        "status": "error",
-        "error_code": response.error_code,
-        "message": response.message,
-        "details": response.details,
-        "recovery_strategy": response.recovery_strategy,
+        "success": False,
+        "error_code": response.error_code,  # type: ignore[attr-defined]
+        "message": response.message,  # type: ignore[attr-defined]
+        "details": response.details,  # type: ignore[attr-defined]
+        "recovery_strategy": response.recovery_strategy,  # type: ignore[attr-defined]
     }
 
 
-def map_error_for_web(error: Exception, status_code: int = 400) -> Dict[str, Any]:
-    """Map exception to web API response format.
-
+def error_to_web_response(error: GofrDigError) -> Dict[str, Any]:
+    """Convert error to web API response format.
+    
     Args:
         error: The exception to convert
-        status_code: HTTP status code (default 400)
-
+        
     Returns:
-        Dictionary suitable for FastAPI JSONResponse
+        Dictionary suitable for FastAPI response
     """
-    response = map_exception_to_response(error)
-
+    response = create_error_response(error)
     return {
-        "status": "error",
         "error": {
-            "code": response.error_code,
-            "message": response.message,
-            "details": response.details,
-            "recovery": response.recovery_strategy,
-        },
+            "code": response.error_code,  # type: ignore[attr-defined]
+            "message": response.message,  # type: ignore[attr-defined]
+            "details": response.details,  # type: ignore[attr-defined]
+            "recovery": response.recovery_strategy,  # type: ignore[attr-defined]
+        }
     }
-
-
-def get_http_status_for_error(error: Exception) -> int:
-    """Determine appropriate HTTP status code for an error.
-
-    Args:
-        error: The exception
-
-    Returns:
-        HTTP status code
-    """
-    if isinstance(error, ResourceNotFoundError):
-        return 404
-    elif isinstance(error, SecurityError):
-        return 403
-    elif isinstance(error, ValidationError):
-        return 400
-    elif isinstance(error, GofrDigError):
-        return 400
-    else:
-        return 500

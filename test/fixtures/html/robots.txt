@@ -1,0 +1,38 @@
+# robots.txt for ACME Corp Test Fixture
+# https://www.robotstxt.org/
+
+User-agent: *
+Allow: /
+Allow: /products.html
+Allow: /about.html
+Allow: /contact.html
+Allow: /blog/
+Disallow: /admin/
+Disallow: /api/
+Disallow: /private/
+Disallow: /internal/
+Disallow: /downloads/confidential/
+
+# Crawl-delay for all bots
+Crawl-delay: 1
+
+# Specific bot rules
+User-agent: Googlebot
+Allow: /
+Disallow: /admin/
+Disallow: /private/
+
+User-agent: Bingbot
+Allow: /
+Disallow: /admin/
+Disallow: /private/
+Crawl-delay: 2
+
+User-agent: BadBot
+Disallow: /
+
+User-agent: AgressiveCrawler
+Disallow: /
+
+# Sitemap location
+Sitemap: https://www.acme-corp.example.com/sitemap.xml
