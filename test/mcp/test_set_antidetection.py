@@ -27,6 +27,7 @@ class TestAntiDetectionProfile:
         assert AntiDetectionProfile.BALANCED.value == "balanced"
         assert AntiDetectionProfile.NONE.value == "none"
         assert AntiDetectionProfile.CUSTOM.value == "custom"
+        assert AntiDetectionProfile.BROWSER_TLS.value == "browser_tls"
 
     def test_profile_from_string(self):
         """Test creating profile from string."""
@@ -34,6 +35,7 @@ class TestAntiDetectionProfile:
         assert AntiDetectionProfile("balanced") == AntiDetectionProfile.BALANCED
         assert AntiDetectionProfile("none") == AntiDetectionProfile.NONE
         assert AntiDetectionProfile("custom") == AntiDetectionProfile.CUSTOM
+        assert AntiDetectionProfile("browser_tls") == AntiDetectionProfile.BROWSER_TLS
 
     def test_invalid_profile_raises(self):
         """Test that invalid profile string raises ValueError."""
@@ -149,6 +151,7 @@ class TestScrapingState:
         assert state.custom_user_agent is None
         assert state.respect_robots_txt is True
         assert state.rate_limit_delay == 1.0
+        assert state.max_tokens == 100000
 
     def test_state_is_singleton(self):
         """Test that get_scraping_state returns same instance."""
@@ -228,6 +231,21 @@ class TestSetAntidetectionMCPTool:
         data = get_mcp_result_data(result)
         assert data["status"] == "configured"
         assert data["profile"] == "none"
+
+    @pytest.mark.asyncio
+    async def test_set_browser_tls_profile(self):
+        """Test setting browser_tls profile via MCP tool."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        result = await handle_call_tool("set_antidetection", {"profile": "browser_tls"})
+
+        data = get_mcp_result_data(result)
+        assert data["status"] == "configured"
+        assert data["profile"] == "browser_tls"
+
+        # Verify state was updated
+        state = get_scraping_state()
+        assert state.antidetection_profile == AntiDetectionProfile.BROWSER_TLS
 
     @pytest.mark.asyncio
     async def test_set_custom_profile_with_headers(self):
@@ -311,6 +329,50 @@ class TestSetAntidetectionMCPTool:
 
         data = get_mcp_result_data(result)
         assert "error" in data
+
+    @pytest.mark.asyncio
+    async def test_set_max_tokens(self):
+        """Test setting max_tokens option."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        result = await handle_call_tool(
+            "set_antidetection",
+            {"profile": "balanced", "max_tokens": 50000},
+        )
+
+        data = get_mcp_result_data(result)
+        assert data["max_tokens"] == 50000
+
+        state = get_scraping_state()
+        assert state.max_tokens == 50000
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_too_low_returns_error(self):
+        """Test that max_tokens below 1000 returns error."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        result = await handle_call_tool(
+            "set_antidetection",
+            {"profile": "balanced", "max_tokens": 500},
+        )
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is False
+        assert data["error_code"] == "INVALID_MAX_TOKENS"
+
+    @pytest.mark.asyncio
+    async def test_max_tokens_too_high_returns_error(self):
+        """Test that max_tokens above 1000000 returns error."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        result = await handle_call_tool(
+            "set_antidetection",
+            {"profile": "balanced", "max_tokens": 2000000},
+        )
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is False
+        assert data["error_code"] == "INVALID_MAX_TOKENS"
 
     @pytest.mark.asyncio
     async def test_tool_is_listed(self):

@@ -41,15 +41,24 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_antidetection",
-            description="Configure anti-detection before scraping. PROFILES: 'stealth'=full browser headers, 'balanced'=standard protection (recommended), 'none'=minimal headers, 'custom'=user-defined. Returns: {success, profile, respect_robots_txt, rate_limit_delay}",
+            description="Configure anti-detection before scraping. PROFILES: 'stealth'=full browser headers, 'balanced'=standard protection (recommended), 'none'=minimal headers, 'custom'=user-defined, 'browser_tls'=Chrome TLS fingerprint (for Wikipedia). TOKEN LIMIT: max_tokens controls response size (default: 100000). Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_tokens}",
             inputSchema={
                 "type": "object",
                 "required": ["profile"],
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "description": "Anti-detection profile: 'stealth', 'balanced', 'none', or 'custom'",
-                        "enum": ["stealth", "balanced", "none", "custom"],
+                        "description": "Anti-detection profile: 'stealth', 'balanced', 'none', 'custom', or 'browser_tls'",
+                        "enum": ["stealth", "balanced", "none", "custom", "browser_tls"],
+                    },
+                    "custom_headers": {
+                        "type": "object",
+                        "description": "Custom headers when profile='custom'",
+                        "additionalProperties": {"type": "string"},
+                    },
+                    "custom_user_agent": {
+                        "type": "string",
+                        "description": "Custom User-Agent when profile='custom'",
                     },
                     "respect_robots_txt": {
                         "type": "boolean",
@@ -57,8 +66,14 @@ def get_tools() -> list[Tool]:
                     },
                     "rate_limit_delay": {
                         "type": "number",
-                        "description": "Delay between requests in seconds (0.1-60.0, default: 1.0)",
+                        "description": "Delay between requests in seconds (0-60.0, default: 1.0)",
                         "minimum": 0,
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Maximum tokens to return (1000-1000000, default: 100000)",
+                        "minimum": 1000,
+                        "maximum": 1000000,
                     },
                 },
             },
@@ -190,7 +205,7 @@ class TestToolSchemas:
         profile_schema = set_ad.inputSchema["properties"]["profile"]
 
         assert "enum" in profile_schema
-        expected_profiles = ["stealth", "balanced", "none", "custom"]
+        expected_profiles = ["stealth", "balanced", "none", "custom", "browser_tls"]
         for profile in expected_profiles:
             assert profile in profile_schema["enum"], \
                 f"Profile '{profile}' not in enum"
@@ -237,7 +252,7 @@ class TestToolDescriptionQuality:
         description = set_ad.description or ""
 
         # Should explain profiles
-        for profile in ["stealth", "balanced", "none", "custom"]:
+        for profile in ["stealth", "balanced", "none", "custom", "browser_tls"]:
             assert profile in description.lower()
 
     def test_get_structure_vs_get_content_guidance(self, tools: list[Tool]) -> None:

@@ -82,6 +82,151 @@ def _exception_response(error: GofrDigError) -> List[TextContent]:
     return [_json_text(response)]
 
 
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count from text (approx 1 token per 4 characters)."""
+    return len(text) // 4
+
+
+def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, bool]:
+    """Truncate text to fit within token limit.
+    
+    Args:
+        text: Text to truncate
+        max_tokens: Maximum tokens allowed
+        
+    Returns:
+        Tuple of (truncated_text, was_truncated)
+    """
+    max_chars = max_tokens * 4
+    if len(text) <= max_chars:
+        return text, False
+    
+    # Truncate and try to end at a sentence or word boundary
+    truncated = text[:max_chars]
+    
+    # Try to find a sentence ending
+    last_period = truncated.rfind('. ')
+    last_newline = truncated.rfind('\n')
+    break_point = max(last_period, last_newline)
+    
+    if break_point > max_chars * 0.8:  # Only use if we keep at least 80%
+        truncated = truncated[:break_point + 1]
+    
+    return truncated.rstrip() + "\n\n[Content truncated due to token limit]", True
+
+
+def _apply_token_limit(page_data: Dict[str, Any], max_tokens: int) -> tuple[Dict[str, Any], bool]:
+    """Apply token limit to a single page's content.
+    
+    Args:
+        page_data: Page data dictionary with 'text' field
+        max_tokens: Maximum tokens allowed
+        
+    Returns:
+        Tuple of (modified_page_data, was_truncated)
+    """
+    if not page_data.get("success", False):
+        return page_data, False
+    
+    text = page_data.get("text", "")
+    if not text:
+        return page_data, False
+    
+    truncated_text, was_truncated = _truncate_to_tokens(text, max_tokens)
+    if was_truncated:
+        page_data = page_data.copy()
+        page_data["text"] = truncated_text
+        page_data["truncated"] = True
+        page_data["original_tokens"] = _estimate_tokens(text)
+        page_data["returned_tokens"] = _estimate_tokens(truncated_text)
+    
+    return page_data, was_truncated
+
+
+def _apply_token_limit_multipage(results: Dict[str, Any], max_tokens: int) -> tuple[Dict[str, Any], bool]:
+    """Apply token limit across multi-page crawl results.
+    
+    Truncates pages in reverse order (deepest first) to preserve most important content.
+    
+    Args:
+        results: Multi-page results with 'pages' array and root 'text'
+        max_tokens: Maximum tokens allowed
+        
+    Returns:
+        Tuple of (modified_results, was_truncated)
+    """
+    # Calculate total tokens across all content
+    root_text = results.get("text", "") or ""
+    root_tokens = _estimate_tokens(root_text)
+    
+    pages = results.get("pages", [])
+    page_tokens = [_estimate_tokens(p.get("text", "") or "") for p in pages]
+    total_tokens = root_tokens + sum(page_tokens)
+    
+    if total_tokens <= max_tokens:
+        return results, False
+    
+    # Need to truncate - work backwards from deepest pages
+    results = results.copy()
+    results["pages"] = [p.copy() for p in pages]
+    results["truncated"] = True
+    results["original_tokens"] = total_tokens
+    
+    tokens_to_remove = total_tokens - max_tokens
+    pages_removed = 0
+    pages_truncated = 0
+    
+    # First, try removing pages from the end (deepest first)
+    while tokens_to_remove > 0 and results["pages"]:
+        last_page = results["pages"][-1]
+        last_page_tokens = _estimate_tokens(last_page.get("text", "") or "")
+        
+        if last_page_tokens <= tokens_to_remove:
+            # Remove entire page
+            results["pages"].pop()
+            tokens_to_remove -= last_page_tokens
+            pages_removed += 1
+        else:
+            # Truncate this page's text
+            remaining_tokens_for_page = last_page_tokens - tokens_to_remove
+            if remaining_tokens_for_page < 500:  # Too small, remove it
+                results["pages"].pop()
+                tokens_to_remove -= last_page_tokens
+                pages_removed += 1
+            else:
+                truncated_text, _ = _truncate_to_tokens(
+                    last_page.get("text", ""),
+                    remaining_tokens_for_page
+                )
+                results["pages"][-1]["text"] = truncated_text
+                results["pages"][-1]["truncated"] = True
+                pages_truncated += 1
+                tokens_to_remove = 0
+    
+    # If still over, truncate root text
+    if tokens_to_remove > 0 and root_text:
+        remaining_tokens_for_root = root_tokens - tokens_to_remove
+        if remaining_tokens_for_root > 500:
+            truncated_text, _ = _truncate_to_tokens(root_text, remaining_tokens_for_root)
+            results["text"] = truncated_text
+    
+    # Update summary
+    results["returned_tokens"] = max_tokens
+    results["pages_removed_for_limit"] = pages_removed
+    results["pages_truncated_for_limit"] = pages_truncated
+    
+    # Recalculate summary
+    actual_pages = len(results["pages"])
+    actual_text_length = len(results.get("text", "") or "")
+    for page in results["pages"]:
+        actual_text_length += len(page.get("text", "") or "")
+    
+    results["summary"]["total_pages"] = actual_pages
+    results["summary"]["total_text_length"] = actual_text_length
+    
+    return results, True
+
+
 @app.list_tools()
 async def handle_list_tools() -> List[Tool]:
     """List available tools."""
@@ -113,15 +258,18 @@ PROFILES:
 - balanced: Good protection for most sites (default). Recommended starting point.
 - none: Minimal headers, fastest but easily detected. Use for APIs or permissive sites.
 - custom: Define your own headers and user agent.
+- browser_tls: Uses curl_cffi to impersonate Chrome's TLS fingerprint. Use for sites like Wikipedia that use TLS fingerprinting to detect Python HTTP libraries.
 
-Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_delay: number}""",
+TOKEN LIMIT: max_tokens controls how much content is returned (default: 100000). Content exceeding this will be truncated, with deepest pages removed first.
+
+Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_delay: number, max_tokens: number}""",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "profile": {
                         "type": "string",
-                        "enum": ["stealth", "balanced", "none", "custom"],
-                        "description": "Anti-detection profile. Use 'balanced' for most sites, 'stealth' for sites with bot detection.",
+                        "enum": ["stealth", "balanced", "none", "custom", "browser_tls"],
+                        "description": "Anti-detection profile. Use 'balanced' for most sites, 'stealth' for sites with bot detection, 'browser_tls' for sites using TLS fingerprinting (e.g., Wikipedia).",
                     },
                     "custom_headers": {
                         "type": "object",
@@ -140,6 +288,13 @@ Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_de
                         "type": "number",
                         "description": "Seconds to wait between requests (default: 1.0). Increase for rate-limited sites.",
                         "minimum": 0,
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Maximum tokens to return in responses (default: 100000). Content will be truncated if exceeded. 1 token ≈ 4 characters.",
+                        "minimum": 1000,
+                        "maximum": 1000000,
+                        "default": 100000,
                     },
                 },
                 "required": ["profile"],
@@ -314,6 +469,22 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
             )
         state.rate_limit_delay = delay
 
+    if "max_tokens" in arguments:
+        max_tokens = arguments["max_tokens"]
+        if max_tokens < 1000:
+            return _error_response(
+                "INVALID_MAX_TOKENS",
+                "max_tokens must be at least 1000",
+                {"provided_value": max_tokens},
+            )
+        if max_tokens > 1000000:
+            return _error_response(
+                "INVALID_MAX_TOKENS",
+                "max_tokens cannot exceed 1000000",
+                {"provided_value": max_tokens},
+            )
+        state.max_tokens = max_tokens
+
     # Create manager to get profile info
     manager = AntiDetectionManager(
         profile=profile,
@@ -329,6 +500,7 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
         "profile_info": manager.get_profile_info(),
         "respect_robots_txt": state.respect_robots_txt,
         "rate_limit_delay": state.rate_limit_delay,
+        "max_tokens": state.max_tokens,
     }
 
     if profile == AntiDetectionProfile.CUSTOM:
@@ -471,11 +643,16 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         if page_data is None:
             return [_json_text({"success": False, "error": "URL already visited"})]
 
+        # Apply token limit truncation
+        state = get_scraping_state()
+        page_data, truncated = _apply_token_limit(page_data, state.max_tokens)
+
         logger.info(
             "Content extracted",
             url=url,
             text_length=len(page_data.get("text", "")),
             links_count=len(page_data.get("links", [])),
+            truncated=truncated,
         )
         return [_json_text(page_data)]
 
@@ -565,12 +742,17 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
         results["summary"]["pages_by_depth"]["3"] = depth_3_count
 
+    # Apply token limit truncation to multi-page results
+    state = get_scraping_state()
+    results, truncated = _apply_token_limit_multipage(results, state.max_tokens)
+
     logger.info(
         "Crawl completed",
         start_url=url,
         depth=depth,
         total_pages=results["summary"]["total_pages"],
         total_text_length=results["summary"]["total_text_length"],
+        truncated=truncated,
     )
 
     return [_json_text(results)]

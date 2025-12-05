@@ -19,12 +19,15 @@ class AntiDetectionProfile(str, Enum):
     - BALANCED: Moderate anti-detection suitable for most sites
     - NONE: No anti-detection, bare minimum headers
     - CUSTOM: User-defined headers and settings
+    - BROWSER_TLS: Uses curl_cffi to impersonate browser TLS fingerprint
+                   (bypasses TLS fingerprinting detection like Wikipedia)
     """
 
     STEALTH = "stealth"
     BALANCED = "balanced"
     NONE = "none"
     CUSTOM = "custom"
+    BROWSER_TLS = "browser_tls"
 
 
 # Common User-Agent strings for rotation
@@ -167,6 +170,7 @@ class AntiDetectionManager:
             AntiDetectionProfile.BALANCED: "Moderate anti-detection with standard browser headers",
             AntiDetectionProfile.NONE: "No anti-detection, minimal headers",
             AntiDetectionProfile.CUSTOM: "User-defined custom headers",
+            AntiDetectionProfile.BROWSER_TLS: "Browser TLS fingerprint impersonation (bypasses TLS fingerprinting)",
         }
 
         return {

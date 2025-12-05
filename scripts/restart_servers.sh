@@ -149,7 +149,7 @@ echo "  Waiting for MCPO to be ready..."
 for i in {1..30}; do
     if curl -s -X POST http://localhost:$MCPO_PORT/ping \
         -H "Content-Type: application/json" \
-        -d '{}' 2>&1 | grep -q '"status":"success"'; then
+        -d '{}' 2>&1 | grep -q '"status":"ok"'; then
         echo "  ✓ MCPO wrapper ready"
         break
     fi

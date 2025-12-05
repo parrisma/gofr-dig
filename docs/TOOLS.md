@@ -96,9 +96,12 @@ Configure anti-detection settings before making scraping requests. Settings pers
 
 | Parameter          | Type   | Required | Default    | Description |
 |--------------------|--------|----------|------------|-------------|
-| profile            | string | No       | "balanced" | Anti-detection profile: `stealth`, `balanced`, `none`, or `custom` |
+| profile            | string | **Yes**  | -          | Anti-detection profile: `stealth`, `balanced`, `none`, `custom`, or `browser_tls` |
+| custom_headers     | object | No       | {}         | Custom headers when profile='custom' |
+| custom_user_agent  | string | No       | null       | Custom User-Agent when profile='custom' |
 | respect_robots_txt | bool   | No       | true       | Whether to honor robots.txt rules |
-| rate_limit_delay   | float  | No       | 1.0        | Seconds to wait between requests (0.1-60.0) |
+| rate_limit_delay   | float  | No       | 1.0        | Seconds to wait between requests (0-60.0) |
+| max_tokens         | int    | No       | 100000     | Maximum tokens to return in responses (1000-1000000). Content exceeding this will be truncated. |
 
 ### Anti-Detection Profiles
 
@@ -108,6 +111,7 @@ Configure anti-detection settings before making scraping requests. Settings pers
 | `balanced` | Standard browser | Fixed modern | No | Most websites (recommended) |
 | `none` | Minimal | Simple | No | Fast scraping of permissive sites |
 | `custom` | User-defined | User-defined | User-defined | Special requirements |
+| `browser_tls` | Chrome-like | Chrome | No | Sites using TLS fingerprinting (e.g., Wikipedia) |
 
 ### Returns
 
@@ -116,7 +120,8 @@ Configure anti-detection settings before making scraping requests. Settings pers
   "success": true,
   "profile": "balanced",
   "respect_robots_txt": true,
-  "rate_limit_delay": 1.0
+  "rate_limit_delay": 1.0,
+  "max_tokens": 100000
 }
 ```
 
@@ -124,6 +129,7 @@ Configure anti-detection settings before making scraping requests. Settings pers
 
 - `INVALID_PROFILE` - Unknown profile name
 - `INVALID_RATE_LIMIT` - Rate limit out of range (0.1-60.0)
+- `INVALID_MAX_TOKENS` - Max tokens out of range (1000-1000000)
 
 ### Use Cases
 
@@ -140,6 +146,16 @@ Configure anti-detection settings before making scraping requests. Settings pers
 3. **Fast scraping of permissive sites:**
    ```json
    {"profile": "none", "rate_limit_delay": 0.1}
+   ```
+
+4. **Sites with TLS fingerprinting (e.g., Wikipedia):**
+   ```json
+   {"profile": "browser_tls"}
+   ```
+
+5. **Limit response size for large crawls:**
+   ```json
+   {"profile": "balanced", "max_tokens": 50000}
    ```
 
 ### Examples
@@ -405,7 +421,7 @@ All tools return a consistent error format when operations fail:
 | `FETCH_ERROR` | Check network connectivity, try again later |
 | `ROBOTS_BLOCKED` | Use `set_antidetection` with `respect_robots_txt=false` |
 | `EXTRACTION_ERROR` | Try different selector or check page structure |
-| `INVALID_PROFILE` | Use one of: stealth, balanced, none, custom |
+| `INVALID_PROFILE` | Use one of: stealth, balanced, none, custom, browser_tls |
 | `INVALID_RATE_LIMIT` | Use value between 0.1 and 60.0 |
 
 ---

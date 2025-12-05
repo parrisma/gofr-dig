@@ -15,8 +15,16 @@ from urllib.parse import urlparse
 import aiohttp
 
 from app.logger import session_logger as logger
-from app.scraping.antidetection import AntiDetectionManager
+from app.scraping.antidetection import AntiDetectionManager, AntiDetectionProfile
 from app.scraping.state import get_scraping_state
+
+# Optional curl_cffi import for browser TLS fingerprinting
+try:
+    from curl_cffi.requests import AsyncSession as CurlAsyncSession
+    CURL_CFFI_AVAILABLE = True
+except ImportError:
+    CURL_CFFI_AVAILABLE = False
+    CurlAsyncSession = None  # type: ignore[assignment, misc]
 
 
 # Retry configuration
@@ -188,6 +196,168 @@ class HTTPFetcher:
 
         self._last_request_time[domain] = asyncio.get_event_loop().time()
 
+    async def _fetch_with_curl_cffi(
+        self,
+        url: str,
+        additional_headers: Optional[Dict[str, str]] = None,
+    ) -> FetchResult:
+        """Fetch using curl_cffi with browser TLS fingerprint impersonation.
+
+        This method bypasses TLS fingerprinting detection used by sites like Wikipedia.
+
+        Args:
+            url: The URL to fetch
+            additional_headers: Extra headers to include in the request
+
+        Returns:
+            FetchResult with the response data or error
+        """
+        if not CURL_CFFI_AVAILABLE or CurlAsyncSession is None:
+            return FetchResult(
+                url=url,
+                status_code=0,
+                content="",
+                error="curl_cffi is not installed. Install with: uv pip install curl_cffi",
+            )
+
+        attempt = 0
+        rate_limited = False
+
+        while True:
+            try:
+                async with CurlAsyncSession(impersonate="chrome") as session:
+                    # Prepare headers
+                    headers = additional_headers.copy() if additional_headers else {}
+
+                    logger.debug(
+                        "Fetching URL with curl_cffi",
+                        url=url,
+                        impersonate="chrome",
+                    )
+
+                    response = await session.get(
+                        url,
+                        headers=headers,
+                        timeout=self.timeout,
+                        allow_redirects=True,
+                        max_redirects=self.max_redirects,
+                    )
+
+                    # Check if we should retry
+                    if self._should_retry(response.status_code, attempt):
+                        response_headers = dict(response.headers)
+                        retry_after = self._parse_retry_after(response_headers)
+                        backoff = self._calculate_backoff(attempt, retry_after)
+
+                        if response.status_code == 429:
+                            rate_limited = True
+                            logger.warning(
+                                "Rate limited (429), retrying",
+                                url=url,
+                                attempt=attempt + 1,
+                                retry_after=retry_after,
+                                backoff=backoff,
+                            )
+                        else:
+                            logger.warning(
+                                "Server error, retrying",
+                                url=url,
+                                status=response.status_code,
+                                attempt=attempt + 1,
+                                backoff=backoff,
+                            )
+
+                        await asyncio.sleep(backoff)
+                        attempt += 1
+                        continue
+
+                    # Get content
+                    content = response.text
+                    content_type = response.headers.get("Content-Type")
+                    response_headers = dict(response.headers)
+
+                    # Detect encoding from response or default to utf-8
+                    encoding = response.encoding or "utf-8"
+
+                    logger.info(
+                        "Fetch completed (curl_cffi)",
+                        url=url,
+                        status=response.status_code,
+                        content_length=len(content),
+                        retries=attempt,
+                    )
+
+                    return FetchResult(
+                        url=str(response.url),
+                        status_code=response.status_code,
+                        content=content,
+                        content_type=content_type,
+                        headers=response_headers,
+                        encoding=encoding,
+                        retry_count=attempt,
+                        rate_limited=rate_limited,
+                    )
+
+            except asyncio.TimeoutError as e:
+                last_error = str(e) or "Request timed out"
+                if attempt < self.max_retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "Fetch timeout, retrying",
+                        url=url,
+                        error=last_error,
+                        attempt=attempt + 1,
+                        backoff=backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    attempt += 1
+                    continue
+                else:
+                    logger.error(
+                        "Fetch failed after retries (curl_cffi)",
+                        url=url,
+                        error=last_error,
+                        attempts=attempt + 1,
+                    )
+                    return FetchResult(
+                        url=url,
+                        status_code=0,
+                        content="",
+                        error=f"HTTP error after {attempt + 1} attempts: {last_error}",
+                        retry_count=attempt,
+                        rate_limited=rate_limited,
+                    )
+
+            except Exception as e:
+                last_error = str(e)
+                if attempt < self.max_retries:
+                    backoff = self._calculate_backoff(attempt)
+                    logger.warning(
+                        "Fetch error, retrying (curl_cffi)",
+                        url=url,
+                        error=last_error,
+                        attempt=attempt + 1,
+                        backoff=backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    attempt += 1
+                    continue
+                else:
+                    logger.error(
+                        "Fetch failed after retries (curl_cffi)",
+                        url=url,
+                        error=last_error,
+                        attempts=attempt + 1,
+                    )
+                    return FetchResult(
+                        url=url,
+                        status_code=0,
+                        content="",
+                        error=f"HTTP error after {attempt + 1} attempts: {last_error}",
+                        retry_count=attempt,
+                        rate_limited=rate_limited,
+                    )
+
     async def fetch(
         self,
         url: str,
@@ -219,6 +389,11 @@ class HTTPFetcher:
 
         # Apply rate limiting
         await self._rate_limit(url)
+
+        # Check if BROWSER_TLS profile is active - use curl_cffi
+        state = get_scraping_state()
+        if state.antidetection_profile == AntiDetectionProfile.BROWSER_TLS:
+            return await self._fetch_with_curl_cffi(url, additional_headers)
 
         # Get headers from anti-detection manager
         manager = self._get_manager()

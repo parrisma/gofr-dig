@@ -13,6 +13,10 @@ from typing import Dict, Optional
 from app.scraping.antidetection import AntiDetectionProfile
 
 
+# Default token limit for content extraction (approx 100k tokens ~ 400k chars)
+DEFAULT_MAX_TOKENS = 100000
+
+
 @dataclass
 class ScrapingState:
     """Global state for scraping operations.
@@ -26,6 +30,7 @@ class ScrapingState:
         custom_user_agent: Custom User-Agent when using 'custom' profile
         respect_robots_txt: Whether to respect robots.txt (default True)
         rate_limit_delay: Delay in seconds between requests (default 1.0)
+        max_tokens: Maximum tokens to return in responses (default 100000)
     """
 
     antidetection_profile: AntiDetectionProfile = AntiDetectionProfile.BALANCED
@@ -33,6 +38,7 @@ class ScrapingState:
     custom_user_agent: Optional[str] = None
     respect_robots_txt: bool = True
     rate_limit_delay: float = 1.0
+    max_tokens: int = DEFAULT_MAX_TOKENS
 
 
 # Global singleton instance for the scraping state
