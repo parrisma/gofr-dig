@@ -21,6 +21,7 @@ class MCPOWrapper:
         mcp_host: str = "localhost",
         mcp_port: int = 8030,
         mcpo_port: int = 8031,
+        mcpo_host: str = "0.0.0.0",
         mcpo_api_key: Optional[str] = None,
         auth_token: Optional[str] = None,
         use_auth: bool = False,
@@ -32,6 +33,7 @@ class MCPOWrapper:
             mcp_host: Host where MCP server is running
             mcp_port: Port where MCP server is listening
             mcpo_port: Port for MCPO proxy to listen on
+            mcpo_host: Host for MCPO proxy to bind to (default: 0.0.0.0)
             mcpo_api_key: API key for Open WebUI -> MCPO authentication (None = no API key)
             auth_token: JWT token for MCPO -> MCP authentication (if use_auth=True)
             use_auth: Whether to use authenticated mode
@@ -39,6 +41,7 @@ class MCPOWrapper:
         self.mcp_host = mcp_host
         self.mcp_port = mcp_port
         self.mcpo_port = mcpo_port
+        self.mcpo_host = mcpo_host
         self.mcpo_api_key = mcpo_api_key
         self.auth_token = auth_token
         self.use_auth = use_auth
@@ -54,6 +57,8 @@ class MCPOWrapper:
             "tool",
             "run",
             "mcpo",
+            "--host",
+            self.mcpo_host,
             "--port",
             str(self.mcpo_port),
             "--server-type",
@@ -83,7 +88,7 @@ class MCPOWrapper:
         logger.info(
             f"Starting MCPO wrapper in {mode} mode",
             mcp_url=f"http://{self.mcp_host}:{self.mcp_port}/mcp",
-            mcpo_port=self.mcpo_port,
+            mcpo_bind=f"{self.mcpo_host}:{self.mcpo_port}",
             use_auth=self.use_auth,
             command=" ".join(cmd),
         )
@@ -155,6 +160,7 @@ def start_mcpo_wrapper(
     mcp_host: str = "localhost",
     mcp_port: int = 8030,
     mcpo_port: int = 8031,
+    mcpo_host: str = "0.0.0.0",
     mcpo_api_key: Optional[str] = None,
     auth_token: Optional[str] = None,
     use_auth: bool = False,
@@ -166,6 +172,7 @@ def start_mcpo_wrapper(
         mcp_host: Host where MCP server is running (default: localhost)
         mcp_port: Port where MCP server is listening (default: 8030)
         mcpo_port: Port for MCPO proxy to listen on (default: 8031)
+        mcpo_host: Host for MCPO proxy to bind to (default: 0.0.0.0)
         mcpo_api_key: API key for Open WebUI -> MCPO (default: from env or None for no auth)
         auth_token: JWT token for MCPO -> MCP (default: from env or None)
         use_auth: Whether to use authenticated mode (default: False)
@@ -197,6 +204,7 @@ def start_mcpo_wrapper(
         mcp_host=mcp_host,
         mcp_port=mcp_port,
         mcpo_port=mcpo_port,
+        mcpo_host=mcpo_host,
         mcpo_api_key=mcpo_api_key,
         auth_token=auth_token,
         use_auth=use_auth,

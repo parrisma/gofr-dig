@@ -1,7 +1,17 @@
 #!/bin/bash
 # Restart all GOFR-DIG servers in correct order: MCP → MCPO → Web
-# Usage: ./restart_servers.sh [--kill-all] [--env PROD|TEST]
-# Default: TEST environment using test/data
+# Usage: ./restart_servers.sh [options]
+#
+# Options:
+#   --env PROD|TEST     Set environment (default: PROD for this script)
+#   --host HOST         Set bind host for all servers (default: 0.0.0.0)
+#   --mcp-port PORT     Override MCP server port
+#   --mcp-host HOST     Override MCP server host
+#   --mcpo-port PORT    Override MCPO wrapper port
+#   --mcpo-host HOST    Override MCPO wrapper host
+#   --web-port PORT     Override Web server port
+#   --web-host HOST     Override Web server host
+#   --kill-all          Stop all servers and exit
 
 set -e
 
@@ -11,11 +21,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export GOFR_DIG_ENV="${GOFR_DIG_ENV:-PROD}"  # Default to PROD for this script
 source "$SCRIPT_DIR/gofr-dig.env"
 
-# Parse command line arguments
+# Parse command line arguments (these override env vars)
 while [[ $# -gt 0 ]]; do
     case $1 in
         --env)
             export GOFR_DIG_ENV="$2"
+            shift 2
+            ;;
+        --host)
+            export GOFR_DIG_HOST="$2"
+            shift 2
+            ;;
+        --mcp-port)
+            export GOFR_DIG_MCP_PORT="$2"
+            shift 2
+            ;;
+        --mcp-host)
+            export GOFR_DIG_MCP_HOST="$2"
+            shift 2
+            ;;
+        --mcpo-port)
+            export GOFR_DIG_MCPO_PORT="$2"
+            shift 2
+            ;;
+        --mcpo-host)
+            export GOFR_DIG_MCPO_HOST="$2"
+            shift 2
+            ;;
+        --web-port)
+            export GOFR_DIG_WEB_PORT="$2"
+            shift 2
+            ;;
+        --web-host)
+            export GOFR_DIG_WEB_HOST="$2"
             shift 2
             ;;
         --kill-all)
@@ -29,18 +67,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Re-source after GOFR_DIG_ENV may have changed
+# Unset data-related vars so they get recalculated based on GOFR_DIG_ENV
+unset GOFR_DIG_DATA GOFR_DIG_STORAGE
+
+# Re-source after env vars may have changed
 source "$SCRIPT_DIR/gofr-dig.env"
 
-# Use variables from gofr-dig.env
+# Use variables from gofr-dig.env (now includes hosts)
 MCP_PORT="$GOFR_DIG_MCP_PORT"
 MCPO_PORT="$GOFR_DIG_MCPO_PORT"
 WEB_PORT="$GOFR_DIG_WEB_PORT"
+MCP_HOST="$GOFR_DIG_MCP_HOST"
+MCPO_HOST="$GOFR_DIG_MCPO_HOST"
+WEB_HOST="$GOFR_DIG_WEB_HOST"
 
 echo "======================================================================="
 echo "GOFR-DIG Server Restart Script"
 echo "Environment: $GOFR_DIG_ENV"
 echo "Data Root: $GOFR_DIG_DATA"
+echo "Network: $GOFR_DIG_NETWORK"
 echo "======================================================================="
 
 # Kill existing processes
@@ -96,13 +141,13 @@ fi
 
 # Start MCP server
 echo ""
-echo "Step 2: Starting MCP server (port $MCP_PORT)..."
+echo "Step 2: Starting MCP server ($MCP_HOST:$MCP_PORT)..."
 echo "-----------------------------------------------------------------------"
 
 cd "$GOFR_DIG_ROOT"
 nohup uv run python -m app.main_mcp \
     --no-auth \
-    --host 0.0.0.0 \
+    --host $MCP_HOST \
     --port $MCP_PORT \
     --web-url "http://localhost:$WEB_PORT" \
     > "$GOFR_DIG_LOGS/gofr_dig_mcp.log" 2>&1 &
@@ -131,13 +176,14 @@ done
 
 # Start MCPO wrapper
 echo ""
-echo "Step 3: Starting MCPO wrapper (port $MCPO_PORT)..."
+echo "Step 3: Starting MCPO wrapper ($MCPO_HOST:$MCPO_PORT)..."
 echo "-----------------------------------------------------------------------"
 
 nohup uv run python -m app.main_mcpo \
     --no-auth \
     --mcp-port $MCP_PORT \
     --mcpo-port $MCPO_PORT \
+    --mcpo-host $MCPO_HOST \
     > "$GOFR_DIG_LOGS/gofr_dig_mcpo.log" 2>&1 &
 
 MCPO_PID=$!
@@ -163,12 +209,12 @@ done
 
 # Start Web server
 echo ""
-echo "Step 4: Starting Web server (port $WEB_PORT)..."
+echo "Step 4: Starting Web server ($WEB_HOST:$WEB_PORT)..."
 echo "-----------------------------------------------------------------------"
 
 nohup uv run python -m app.main_web \
     --no-auth \
-    --host 0.0.0.0 \
+    --host $WEB_HOST \
     --port $WEB_PORT \
     > "$GOFR_DIG_LOGS/gofr_dig_web.log" 2>&1 &
 
