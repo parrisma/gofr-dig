@@ -1,61 +1,32 @@
 #!/bin/bash
-# =============================================================================
-# GOFR-DIG Docker Development Container Launcher
-# =============================================================================
-# Usage: ./run-dev.sh [options]
-#
-# Options:
-#   --network NAME      Docker network name (default: from gofr-dig.env or gofr-net)
-#   --container NAME    Container name (default: from gofr-dig.env or gofr-dig_dev)
-#   --volume NAME       Data volume name (default: from gofr-dig.env or gofr-dig_data_dev)
-#   --host HOST         Bind host for all services (default: 0.0.0.0)
-#   --mcp-port PORT     MCP server port (default: from gofr-dig.env or 8030)
-#   --mcpo-port PORT    MCPO wrapper port (default: from gofr-dig.env or 8031)
-#   --web-port PORT     Web server port (default: from gofr-dig.env or 8032)
-#
-# Environment Variables (from gofr-dig.env):
-#   GOFR_DIG_NETWORK, GOFR_DIG_CONTAINER, GOFR_DIG_DATA_VOLUME
-#   GOFR_DIG_MCP_PORT, GOFR_DIG_MCPO_PORT, GOFR_DIG_WEB_PORT
-# =============================================================================
+# Run GOFR-DIG development container
+# Uses gofr-dig-dev:latest image (built from gofr-base:latest)
+# Standard user: gofr (UID 1000, GID 1000)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# gofr-common is now a git submodule at lib/gofr-common, no separate mount needed
 
-# Source centralized configuration if available
-if [ -f "$PROJECT_ROOT/scripts/gofr-dig.env" ]; then
-    source "$PROJECT_ROOT/scripts/gofr-dig.env"
-fi
+# Standard GOFR user - all projects use same user
+GOFR_USER="gofr"
+GOFR_UID=1000
+GOFR_GID=1000
 
-# Set defaults (using gofr-dig.env values if available)
-NETWORK="${GOFR_DIG_NETWORK:-gofr-net}"
-CONTAINER="${GOFR_DIG_CONTAINER:-gofr-dig_dev}"
-VOLUME="${GOFR_DIG_DATA_VOLUME:-gofr-dig_data_dev}"
-HOST="${GOFR_DIG_HOST:-0.0.0.0}"
-MCP_PORT="${GOFR_DIG_MCP_PORT:-8030}"
-MCPO_PORT="${GOFR_DIG_MCPO_PORT:-8031}"
-WEB_PORT="${GOFR_DIG_WEB_PORT:-8032}"
+# Container and image names
+CONTAINER_NAME="gofr-dig-dev"
+IMAGE_NAME="gofr-dig-dev:latest"
 
-# Parse command line arguments (override env vars)
-while [[ $# -gt 0 ]]; do
+# Defaults from environment or hardcoded (gofr-dig uses 8030-8032)
+MCP_PORT="${GOFRDIG_MCP_PORT:-8030}"
+MCPO_PORT="${GOFRDIG_MCPO_PORT:-8031}"
+WEB_PORT="${GOFRDIG_WEB_PORT:-8032}"
+DOCKER_NETWORK="${GOFRDIG_DOCKER_NETWORK:-gofr-net}"
+
+# Parse command line arguments
+while [ $# -gt 0 ]; do
     case $1 in
-        --network)
-            NETWORK="$2"
-            shift 2
-            ;;
-        --container)
-            CONTAINER="$2"
-            shift 2
-            ;;
-        --volume)
-            VOLUME="$2"
-            shift 2
-            ;;
-        --host)
-            HOST="$2"
-            shift 2
-            ;;
         --mcp-port)
             MCP_PORT="$2"
             shift 2
@@ -68,111 +39,71 @@ while [[ $# -gt 0 ]]; do
             WEB_PORT="$2"
             shift 2
             ;;
+        --network)
+            DOCKER_NETWORK="$2"
+            shift 2
+            ;;
         *)
-            # Legacy positional args support: WEB_PORT MCP_PORT MCPO_PORT
-            if [[ "$1" =~ ^[0-9]+$ ]]; then
-                WEB_PORT="$1"
-                shift
-                if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
-                    MCP_PORT="$1"
-                    shift
-                    if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
-                        MCPO_PORT="$1"
-                        shift
-                    fi
-                fi
-            else
-                echo "Unknown option: $1"
-                exit 1
-            fi
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--mcp-port PORT] [--mcpo-port PORT] [--web-port PORT] [--network NAME]"
+            exit 1
             ;;
     esac
 done
 
+echo "======================================================================="
+echo "Starting GOFR-DIG Development Container"
+echo "======================================================================="
+echo "User: ${GOFR_USER} (UID=${GOFR_UID}, GID=${GOFR_GID})"
+echo "Ports: MCP=$MCP_PORT, MCPO=$MCPO_PORT, Web=$WEB_PORT"
+echo "Network: $DOCKER_NETWORK"
+echo "======================================================================="
+
 # Create docker network if it doesn't exist
-echo "Checking for $NETWORK network..."
-if ! docker network inspect "$NETWORK" >/dev/null 2>&1; then
-    echo "Creating $NETWORK network..."
-    docker network create "$NETWORK"
-else
-    echo "Network $NETWORK already exists"
+if ! docker network inspect $DOCKER_NETWORK >/dev/null 2>&1; then
+    echo "Creating network: $DOCKER_NETWORK"
+    docker network create $DOCKER_NETWORK
 fi
 
-# Create docker volume for persistent data if it doesn't exist
-echo "Checking for $VOLUME volume..."
-if ! docker volume inspect "$VOLUME" >/dev/null 2>&1; then
-    echo "Creating $VOLUME volume..."
-    docker volume create "$VOLUME"
-    VOLUME_CREATED=true
-else
-    echo "Volume $VOLUME already exists"
-    VOLUME_CREATED=false
+# Create docker volume for persistent data
+VOLUME_NAME="gofr-dig-data-dev"
+if ! docker volume inspect $VOLUME_NAME >/dev/null 2>&1; then
+    echo "Creating volume: $VOLUME_NAME"
+    docker volume create $VOLUME_NAME
 fi
 
-# Stop and remove existing container if it exists
-echo "Stopping existing $CONTAINER container..."
-docker stop "$CONTAINER" 2>/dev/null || true
+# Stop and remove existing container
+if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Stopping existing container: $CONTAINER_NAME"
+    docker stop "$CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$CONTAINER_NAME" 2>/dev/null || true
+fi
 
-echo "Removing existing $CONTAINER container..."
-docker rm "$CONTAINER" 2>/dev/null || true
-
-echo "Starting new $CONTAINER container..."
-echo "Mounting $HOME/devroot/gofr-dig to /home/gofr/devroot/gofr-dig in container"
-echo "Mounting $HOME/.ssh to /home/gofr/.ssh (read-only) in container"
-echo "Mounting $VOLUME volume to /home/gofr/devroot/gofr-dig/data in container"
-echo "Network: $NETWORK"
-echo "Web port: $WEB_PORT, MCP port: $MCP_PORT, MCPO port: $MCPO_PORT"
-
+# Run container
 docker run -d \
---name "$CONTAINER" \
---network "$NETWORK" \
---user $(id -u):$(id -g) \
--v "$HOME/devroot/gofr-dig":/home/gofr/devroot/gofr-dig \
--v "$HOME/.ssh:/home/gofr/.ssh:ro" \
--v "$VOLUME":/home/gofr/devroot/gofr-dig/data \
--e GOFR_DIG_HOST="$HOST" \
--e GOFR_DIG_MCP_PORT="$MCP_PORT" \
--e GOFR_DIG_MCPO_PORT="$MCPO_PORT" \
--e GOFR_DIG_WEB_PORT="$WEB_PORT" \
--e GOFR_DIG_NETWORK="$NETWORK" \
--p $MCP_PORT:$MCP_PORT \
--p $MCPO_PORT:$MCPO_PORT \
--p $WEB_PORT:$WEB_PORT \
-gofr-dig_dev:latest
+    --name "$CONTAINER_NAME" \
+    --network "$DOCKER_NETWORK" \
+    -p ${MCP_PORT}:8030 \
+    -p ${MCPO_PORT}:8031 \
+    -p ${WEB_PORT}:8032 \
+    -v "$PROJECT_ROOT:/home/gofr/devroot/gofr-dig:rw" \
+    -v ${VOLUME_NAME}:/home/gofr/devroot/gofr-dig/data:rw \
+    -e GOFRDIG_ENV=development \
+    -e GOFRDIG_DEBUG=true \
+    -e GOFRDIG_LOG_LEVEL=DEBUG \
+    "$IMAGE_NAME"
 
-if docker ps -q -f name="$CONTAINER" | grep -q .; then
-    echo "Container $CONTAINER is now running"
-    
-    # Fix volume permissions if it was just created
-    if [ "$VOLUME_CREATED" = true ]; then
-        echo "Fixing permissions on newly created volume..."
-        docker exec -u root "$CONTAINER" chown -R gofr:gofr /home/gofr/devroot/gofr-dig/data
-        echo "Volume permissions fixed"
-    fi
-    
-    echo ""
-    echo "==================================================================="
-    echo "OpenWebUI Integration:"
-    echo "  MCPO Proxy:    http://localhost:$MCPO_PORT"
-    echo "                 (Use this URL in OpenWebUI -> Connections -> Tools)"
-    echo ""
-    echo "Development Container Access:"
-    echo "  Shell:         docker exec -it $CONTAINER /bin/bash"
-    echo "  VS Code:       Attach to container '$CONTAINER'"
-    echo ""
-    echo "Internal Services (for debugging):"
-    echo "  Web Server:    http://localhost:$WEB_PORT"
-    echo "  MCP Server:    http://localhost:$MCP_PORT/mcp"
-    echo ""
-    echo "Access from $NETWORK (other containers):"
-    echo "  MCPO Proxy:    http://$CONTAINER:$MCPO_PORT"
-    echo ""
-    echo "Data & Storage:"
-    echo "  Volume:        $VOLUME"
-    echo "  Source Mount:  $HOME/devroot/gofr-dig (live-reload)"
-    echo "==================================================================="
-    echo ""
-else
-    echo "ERROR: Container $CONTAINER failed to start"
-    exit 1
-fi
+echo ""
+echo "======================================================================="
+echo "Container started: $CONTAINER_NAME"
+echo "======================================================================="
+echo ""
+echo "Ports:"
+echo "  - $MCP_PORT: MCP server"
+echo "  - $MCPO_PORT: MCPO proxy"
+echo "  - $WEB_PORT: Web interface"
+echo ""
+echo "Useful commands:"
+echo "  docker logs -f $CONTAINER_NAME          # Follow logs"
+echo "  docker exec -it $CONTAINER_NAME bash    # Shell access"
+echo "  docker stop $CONTAINER_NAME             # Stop container"

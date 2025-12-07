@@ -167,3 +167,4 @@ Thumbs.db
 data/sessions/**/*.json
 data/storage/**/*.json
 
+!lib/gofr-common

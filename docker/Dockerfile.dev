@@ -1,63 +1,46 @@
-FROM gofr-dig_base:latest
+# GOFR-DIG Development Image
+# Extends gofr-base:latest with project-specific dev tools
+FROM gofr-base:latest
 
-# Install Git, GitHub CLI, SSH daemon, and network/debug utilities
+# Switch to root for package installation
+USER root
+
+# Install additional dev tools
 RUN apt-get update && apt-get install -y \
-    git \
     gh \
     openssh-server \
-    # Network utilities
-    iputils-ping \
     dnsutils \
     net-tools \
     netcat-openbsd \
-    curl \
-    wget \
     telnet \
-    # Process/port utilities
     lsof \
     htop \
     strace \
     tcpdump \
-    # Text processing
-    jq \
     vim \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
-# Set default UID and GID (can be overridden at build time)
-ARG USER_UID=1000
-ARG USER_GID=1000
+# Create project directories
+RUN mkdir -p /home/gofr/devroot/gofr-dig/data \
+    && mkdir -p /home/gofr/devroot/gofr-common \
+    && chown -R gofr:gofr /home/gofr/devroot
 
-# Add Unix group 'gofr' with configurable GID
-RUN groupadd --system --gid ${USER_GID} gofr
-
-# Add user 'gofr' with configurable UID and assign to group 'gofr'
-RUN useradd --system --uid ${USER_UID} --gid ${USER_GID} --home-dir /home/gofr --create-home gofr
-
-# Create project directory and data directory, set ownership to gofr
-RUN mkdir -p /home/gofr/devroot/gofr-dig /home/gofr/devroot/gofr-dig/data && \
-    chown -R gofr:gofr /home/gofr/devroot
-
-# Copy entrypoint script as root before switching users
+# Copy entrypoint
 COPY docker/entrypoint-dev.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Switch to gofr user
-USER gofr
 WORKDIR /home/gofr/devroot/gofr-dig
 
-# Configure SSH for user gofr only (no exposed port, uses ~/.ssh)
+# SSH config for git operations
 RUN mkdir -p /home/gofr/.ssh && chmod 700 /home/gofr/.ssh
 
-# Note: .venv is created by entrypoint-dev.sh at runtime, not during build
-# This is because the source directory is mounted as a volume and overwrites
-# anything created during the build phase.
+# Create venv (will be populated by entrypoint)
+RUN uv venv /home/gofr/devroot/gofr-dig/.venv --python=python3.11
 
-# Set environment variables to use the project venv (will be created at runtime)
-ENV VIRTUAL_ENV=/home/gofr/devroot/gofr-dig/.venv
-ENV PATH="/home/gofr/devroot/gofr-dig/.venv/bin:$PATH"
+# Standard GOFR ports (gofr-dig uses 8030-8032)
+EXPOSE 8030 8031 8032
 
-# Use entrypoint to handle initialization (creates venv if missing)
+USER gofr
 ENTRYPOINT ["/entrypoint.sh"]
-
-# Keep container running with infinite wait loop
 CMD ["tail", "-f", "/dev/null"]
