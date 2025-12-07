@@ -5,14 +5,10 @@ description = "GOFR-DIG MCP Server"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
+# Note: gofr-common is installed as editable from lib/gofr-common submodule by entrypoint
+# Core deps (mcp, pydantic, fastapi, uvicorn, starlette, PyJWT, httpx, mcpo) come from gofr-common
 dependencies = [
-    "mcp>=0.9.0",
-    "pydantic>=2.0",
-    "uvicorn>=0.30.0",
-    "fastapi>=0.111.0",
-    "starlette>=0.37.0",
-    "PyJWT>=2.8.0",
-    "httpx>=0.27.0",
+    # Project-specific dependencies only
     "html2text>=2025.4.15",
     "weasyprint>=67.0",
     "aiohttp>=3.9.0",
@@ -41,14 +37,13 @@ target-version = ["py311"]
 line-length = 100
 target-version = "py311"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "pyright>=1.1.0",
-    "mcpo>=0.0.19",
 ]
 
 [tool.pytest.ini_options]
