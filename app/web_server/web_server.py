@@ -3,16 +3,22 @@
 from typing import Optional, Any
 
 from starlette.applications import Starlette
-from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from gofr_common.web import (
+    create_cors_middleware,
+    create_ping_response,
+    create_health_response,
+)
 from app.auth import AuthService
 
 
 class GofrDigWebServer:
     """Minimal web server for GOFR-DIG - provides basic endpoints."""
+
+    SERVICE_NAME = "gofr-dig-web"
 
     def __init__(
         self,
@@ -35,35 +41,29 @@ class GofrDigWebServer:
 
         app = Starlette(debug=False, routes=routes)
 
-        # Add CORS middleware
-        app = CORSMiddleware(
-            app,
-            allow_origins=["*"],
-            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-            allow_headers=["*"],
-        )
+        # Add CORS middleware using gofr_common
+        app = create_cors_middleware(app)
 
         return app
 
     async def root(self, request: Request) -> JSONResponse:
         """Root endpoint."""
         return JSONResponse({
-            "service": "gofr-dig-web",
+            "service": self.SERVICE_NAME,
             "status": "ok",
             "message": "GOFR-DIG Web Server - Stub Implementation",
         })
 
     async def ping(self, request: Request) -> JSONResponse:
         """Health check ping endpoint."""
-        return JSONResponse({"status": "ok", "service": "gofr-dig-web"})
+        return JSONResponse(create_ping_response(self.SERVICE_NAME))
 
     async def health(self, request: Request) -> JSONResponse:
         """Health check endpoint."""
-        return JSONResponse({
-            "status": "healthy",
-            "service": "gofr-dig-web",
-            "auth_enabled": self.auth_service is not None,
-        })
+        return JSONResponse(create_health_response(
+            service=self.SERVICE_NAME,
+            auth_enabled=self.auth_service is not None,
+        ))
 
     def get_app(self) -> Any:
         """Return the ASGI application."""
