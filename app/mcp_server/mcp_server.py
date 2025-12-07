@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 from typing import Any, AsyncIterator, Dict, List
 
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import TextContent, Tool
+
+from gofr_common.mcp import json_text as _common_json_text, MCPResponseBuilder
 
 from app.logger import session_logger as logger
 from app.scraping import (
@@ -31,10 +32,14 @@ proxy_url_mode: bool = False
 
 app = Server("gofr-dig-service")
 
+# Initialize response builder with scraping-specific recovery strategies
+_response_builder = MCPResponseBuilder()
+_response_builder.set_recovery_strategies(RECOVERY_STRATEGIES)
+
 
 def _json_text(data: Dict[str, Any]) -> TextContent:
-    """Create JSON text content."""
-    return TextContent(type="text", text=json.dumps(data, indent=2))
+    """Create JSON text content - uses gofr_common."""
+    return _common_json_text(data)
 
 
 def _error_response(
