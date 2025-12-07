@@ -1,7 +1,7 @@
 import logging as python_logging
 import uuid
 from typing import Any
-from .interface import Logger
+from gofr_common.logger import Logger
 
 
 class ConsoleLogger(Logger):

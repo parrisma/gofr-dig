@@ -1,8 +1,6 @@
-"""
-Logger module for gofr-dig
+"""Logger module for gofr-dig
 
-This module provides a flexible logging interface that allows users to
-drop in their own logger implementations.
+Re-exports from gofr_common.logger for backward compatibility.
 
 Usage:
     from app.logger import Logger, DefaultLogger
@@ -18,7 +16,7 @@ Usage:
             pass
 """
 
-from .interface import Logger
+from gofr_common.logger import Logger
 from .default_logger import DefaultLogger
 from .console_logger import ConsoleLogger
 import logging

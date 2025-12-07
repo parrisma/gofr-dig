@@ -2,7 +2,7 @@ import sys
 import uuid
 from datetime import datetime
 from typing import Any, TextIO
-from .interface import Logger
+from gofr_common.logger import Logger
 
 
 class DefaultLogger(Logger):

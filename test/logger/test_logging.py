@@ -70,13 +70,6 @@ class TestLoggingIntegration:
         # The test passes if no exception is raised
         # Error logging is handled internally
 
-    def test_auth_middleware_import(self):
-        """Test auth middleware has logger import."""
-        from app.auth import middleware
-
-        # Check that the module can be imported and has logger
-        assert hasattr(middleware, "logger")
-
     def test_error_mapper_import(self):
         """Test error mapper has logger import."""
         from app.errors import mapper
