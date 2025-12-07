@@ -2,16 +2,22 @@
 
 All exceptions include detailed error messages designed for LLM processing,
 enabling intelligent error recovery and decision-making.
+
+Base exceptions are re-exported from gofr_common.exceptions.
 """
 
-from app.exceptions.base import (
-    GofrDigError,
+# Re-export common exceptions from gofr_common
+from gofr_common.exceptions import (
+    GofrError,
     ValidationError,
     ResourceNotFoundError,
     SecurityError,
     ConfigurationError,
     RegistryError,
 )
+
+# Project-specific alias for backward compatibility
+GofrDigError = GofrError
 
 # Optional imports for modules that may not exist yet
 try:
@@ -47,14 +53,15 @@ try:
         InvalidSessionStateError,
     )
 except ImportError:
-    SessionError = type("SessionError", (GofrDigError,), {})  # type: ignore[misc, assignment]
+    SessionError = type("SessionError", (GofrError,), {})  # type: ignore[misc, assignment]
     SessionNotFoundError = type("SessionNotFoundError", (ResourceNotFoundError,), {})  # type: ignore[misc, assignment]
     SessionValidationError = type("SessionValidationError", (ValidationError,), {})  # type: ignore[misc, assignment]
     InvalidSessionStateError = type("InvalidSessionStateError", (ValidationError,), {})  # type: ignore[misc, assignment]
 
 __all__ = [
-    # Base exceptions
-    "GofrDigError",
+    # Base exceptions (from gofr_common)
+    "GofrError",
+    "GofrDigError",  # Alias for backward compatibility
     "ValidationError",
     "ResourceNotFoundError",
     "SecurityError",
@@ -71,3 +78,4 @@ __all__ = [
     "SessionValidationError",
     "InvalidSessionStateError",
 ]
+

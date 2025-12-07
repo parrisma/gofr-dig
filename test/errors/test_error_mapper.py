@@ -54,10 +54,14 @@ class TestGetErrorCode:
         assert code == "CONFIGURATION"
 
     def test_base_error_class(self):
-        """Test base GofrDigError class name conversion."""
+        """Test base GofrDigError class name conversion.
+        
+        Note: GofrDigError is now an alias for gofr_common.GofrError,
+        so the class name is 'GofrError' -> 'GOFR'.
+        """
         error = GofrDigError("TEST", "test message")
         code = get_error_code(error)
-        assert code == "GOFR_DIG"
+        assert code == "GOFR"
 
 
 class TestGetRecoveryStrategy:
