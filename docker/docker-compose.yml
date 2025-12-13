@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  gofr-dig:
+    image: gofr-dig-dev:latest
+    container_name: gofr-dig-dev
+    networks:
+      - gofr-net
+    ports:
+      - "${GOFRDIG_MCP_PORT:-8030}:8030"
+      - "${GOFRDIG_MCPO_PORT:-8031}:8031"
+      - "${GOFRDIG_WEB_PORT:-8032}:8032"
+    volumes:
+      - ../:/home/gofr/devroot/gofr-dig:rw
+      - gofr_dig_data:/home/gofr/devroot/gofr-dig/data:rw
+    environment:
+      - GOFRDIG_ENV=development
+      - GOFRDIG_DEBUG=true
+      - GOFRDIG_LOG_LEVEL=DEBUG
+    restart: unless-stopped
+
+  backup:
+    image: gofr-common-backup:latest
+    container_name: gofr-dig-backup
+    networks:
+      - gofr-net
+    volumes:
+      # Read-only mount of data to backup
+      - gofr_dig_data:/backup/source/data:ro
+      - ../logs:/backup/source/logs:ro
+      # Backup destination
+      - gofr_dig_backups:/backup/destination
+    environment:
+      # Project identifier - REQUIRED
+      - GOFR_PROJECT=dig
+      
+      # Backup schedule (cron format) - default: daily at 2 AM
+      - GOFR_DIG_BACKUP_SCHEDULE=0 2 * * *
+      
+      # Retention policy
+      - GOFR_DIG_BACKUP_MAX_AGE_DAYS=30
+      - GOFR_DIG_BACKUP_MAX_COUNT=10
+      
+      # Compression settings
+      - GOFR_DIG_BACKUP_COMPRESSION=gzip
+      - GOFR_DIG_BACKUP_COMPRESSION_LEVEL=6
+      
+      # Paths to backup (relative to /backup/source)
+      - GOFR_DIG_BACKUP_PATHS=data,logs
+      
+      # Backup destination
+      - GOFR_DIG_BACKUP_DESTINATION=/backup/destination
+      
+      # Verification
+      - GOFR_DIG_BACKUP_VERIFY=true
+    restart: unless-stopped
+    depends_on:
+      - gofr-dig
+
+networks:
+  gofr-net:
+    external: true
+
+volumes:
+  gofr_dig_data:
+    name: gofr-dig-data-dev
+  gofr_dig_backups:
+    name: gofr-dig-backups
