@@ -24,6 +24,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_ROOT}"
 
+# Activate the virtual environment (created by entrypoint-dev.sh)
+VENV_DIR="${PROJECT_ROOT}/.venv"
+if [ -f "${VENV_DIR}/bin/activate" ]; then
+    source "${VENV_DIR}/bin/activate"
+    echo "Activated venv: ${VENV_DIR}"
+else
+    echo "Warning: Virtual environment not found at ${VENV_DIR}"
+    echo "Run the container entrypoint or create venv manually"
+fi
+
 # Source centralized configuration
 export GOFR_DIG_ENV=TEST
 source "$SCRIPT_DIR/gofr-dig.env"
