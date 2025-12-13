@@ -14,3 +14,5 @@ html2text>=2020.1.16
 PyYAML>=6.0
 Babel>=2.13.0
 pypdf>=4.0.0
+beautifulsoup4>=4.12.0
+aiohttp>=3.8.0

@@ -31,6 +31,18 @@ source "$SCRIPT_DIR/gofr-dig.env"
 # Test configuration constants
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 
+# Determine gofr-common location and set PYTHONPATH
+if [ -d "${PROJECT_ROOT}/lib/gofr-common/src" ]; then
+    # Container/Submodule layout
+    export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/lib/gofr-common/src"
+elif [ -d "${PROJECT_ROOT}/../gofr-common/src" ]; then
+    # Local dev layout
+    export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/../gofr-common/src"
+else
+    echo "Warning: gofr-common source not found. Assuming installed in environment."
+    export PYTHONPATH="${PROJECT_ROOT}"
+fi
+
 # Use variables from gofr-dig.env
 STORAGE_DIR="$GOFR_DIG_STORAGE"
 
@@ -131,7 +143,7 @@ start_mcp_server() {
     
     free_port "${GOFR_DIG_MCP_PORT}"
     
-    nohup uv run python app/main_mcp.py \
+    nohup python app/main_mcp.py \
         --port="${GOFR_DIG_MCP_PORT}" \
         --jwt-secret="${GOFR_DIG_JWT_SECRET}" \
         --token-store="${GOFR_DIG_TOKEN_STORE}" \
@@ -176,7 +188,7 @@ start_web_server() {
     
     free_port "${GOFR_DIG_WEB_PORT}"
     
-    nohup uv run python app/main_web.py \
+    nohup python app/main_web.py \
         --port="${GOFR_DIG_WEB_PORT}" \
         --jwt-secret="${GOFR_DIG_JWT_SECRET}" \
         --token-store="${GOFR_DIG_TOKEN_STORE}" \

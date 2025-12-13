@@ -22,6 +22,8 @@ from app.scraping import (
 from app.scraping.state import get_scraping_state
 from app.exceptions import GofrDigError
 from app.errors.mapper import error_to_mcp_response, RECOVERY_STRATEGIES
+from app.session.manager import SessionManager
+from app.config import Config
 
 # Module-level configuration (set by main_mcp.py)
 auth_service: Any = None
@@ -29,6 +31,7 @@ templates_dir_override: str | None = None
 styles_dir_override: str | None = None
 web_url_override: str | None = None
 proxy_url_mode: bool = False
+session_manager: SessionManager | None = None
 
 app = Server("gofr-dig-service")
 
@@ -37,7 +40,16 @@ _response_builder = MCPResponseBuilder()
 _response_builder.set_recovery_strategies(RECOVERY_STRATEGIES)
 
 
-def _json_text(data: Dict[str, Any]) -> TextContent:
+def get_session_manager() -> SessionManager:
+    """Get or initialize the session manager."""
+    global session_manager
+    if session_manager is None:
+        storage_dir = Config.get_storage_dir() / "sessions"
+        session_manager = SessionManager(storage_dir)
+    return session_manager
+
+
+def _json_text(data: Any) -> TextContent:
     """Create JSON text content - uses gofr_common."""
     return _common_json_text(data)
 
@@ -358,6 +370,14 @@ TIPS:
                         "type": "boolean",
                         "description": "Include page metadata like description, keywords, og:tags (default: true).",
                     },
+                    "session": {
+                        "type": "boolean",
+                        "description": "If true, saves content to a session and returns a session_id instead of full content. Use for large pages.",
+                    },
+                    "chunk_size": {
+                        "type": "integer",
+                        "description": "Chunk size in characters for session storage (default: 4000). Only used if session=true.",
+                    },
                 },
                 "required": ["url"],
             },
@@ -407,6 +427,38 @@ USE get_content WHEN:
                 "required": ["url"],
             },
         ),
+        Tool(
+            name="get_session_info",
+            description="Get metadata for a scraping session. Returns total size, chunk count, and source URL.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session GUID returned by get_content(session=true)",
+                    },
+                },
+                "required": ["session_id"],
+            },
+        ),
+        Tool(
+            name="get_session_chunk",
+            description="Get a specific chunk of text content from a session.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session GUID",
+                    },
+                    "chunk_index": {
+                        "type": "integer",
+                        "description": "Zero-based index of the chunk to retrieve",
+                    },
+                },
+                "required": ["session_id", "chunk_index"],
+            },
+        ),
     ]
 
 
@@ -430,6 +482,12 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
 
     if name == "get_structure":
         return await _handle_get_structure(arguments)
+
+    if name == "get_session_info":
+        return await _handle_get_session_info(arguments)
+
+    if name == "get_session_chunk":
+        return await _handle_get_session_chunk(arguments)
 
     return _error_response("UNKNOWN_TOOL", f"Unknown tool: {name}", {"tool_name": name})
 
@@ -537,6 +595,8 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     include_links = arguments.get("include_links", True)
     include_images = arguments.get("include_images", False)
     include_meta = arguments.get("include_meta", True)
+    use_session = arguments.get("session", False)
+    chunk_size = arguments.get("chunk_size")
 
     # Get base domain for internal link filtering
     base_domain = urlparse(url).netloc
@@ -647,6 +707,37 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         page_data = await fetch_single_page(url)
         if page_data is None:
             return [_json_text({"success": False, "error": "URL already visited"})]
+
+        # Handle session storage if requested
+        if use_session:
+            manager = get_session_manager()
+            # Use provided chunk_size or default to 4000
+            c_size = chunk_size if chunk_size is not None else 4000
+
+            try:
+                session_id = manager.create_session(
+                    url=url, content=page_data, chunk_size=c_size
+                )
+
+                # Get session info for response
+                info = manager.get_session_info(session_id)
+
+                return [
+                    _json_text(
+                        {
+                            "success": True,
+                            "session_id": session_id,
+                            "url": url,
+                            "total_chunks": info["total_chunks"],
+                            "total_size": info["total_size_bytes"],
+                            "chunk_size": info["chunk_size"],
+                            "created_at": info["created_at"],
+                        }
+                    )
+                ]
+            except Exception as e:
+                logger.error("Failed to create session", error=str(e))
+                return _error_response("SESSION_ERROR", f"Failed to create session: {str(e)}")
 
         # Apply token limit truncation
         state = get_scraping_state()
@@ -851,6 +942,38 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
         external_links_count=len(structure.external_links),
     )
     return [_json_text(response)]
+
+
+async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Handle get_session_info tool call."""
+    session_id = arguments.get("session_id")
+    if not session_id:
+        return _error_response("INVALID_ARGUMENT", "session_id is required")
+
+    try:
+        manager = get_session_manager()
+        info = manager.get_session_info(session_id)
+        return [_json_text(info)]
+    except Exception as e:
+        return _error_response("SESSION_ERROR", str(e))
+
+
+async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Handle get_session_chunk tool call."""
+    session_id = arguments.get("session_id")
+    chunk_index = arguments.get("chunk_index")
+
+    if not session_id:
+        return _error_response("INVALID_ARGUMENT", "session_id is required")
+    if chunk_index is None:
+        return _error_response("INVALID_ARGUMENT", "chunk_index is required")
+
+    try:
+        manager = get_session_manager()
+        chunk_data = manager.get_chunk(session_id, chunk_index)
+        return [_json_text(chunk_data)]
+    except Exception as e:
+        return _error_response("SESSION_ERROR", str(e))
 
 
 async def initialize_server() -> None:
