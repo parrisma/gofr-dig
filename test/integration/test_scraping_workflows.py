@@ -10,7 +10,7 @@ and create MCP sessions inline for each test.
 import json
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 
 MCP_URL = "http://localhost:8030/mcp"
@@ -46,7 +46,7 @@ class TestWebResearchWorkflow:
         """
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -83,7 +83,7 @@ class TestWebResearchWorkflow:
         """
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -115,7 +115,7 @@ class TestWebResearchWorkflow:
         """
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -143,7 +143,7 @@ class TestMultiLanguageWorkflow:
         """Workflow: Extract and process Chinese content."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -173,7 +173,7 @@ class TestMultiLanguageWorkflow:
         """Workflow: Extract and process Japanese content."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -197,7 +197,7 @@ class TestRobotsComplianceWorkflow:
         """Workflow: Agent attempts to access blocked path."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -222,7 +222,7 @@ class TestRobotsComplianceWorkflow:
         """Workflow: Agent accesses allowed paths."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -240,7 +240,7 @@ class TestRobotsComplianceWorkflow:
         """Workflow: Agent disables robots.txt checking for special access."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -269,7 +269,7 @@ class TestLinkDiscoveryWorkflow:
         """Workflow: Agent discovers all internal links on a page."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -289,7 +289,7 @@ class TestLinkDiscoveryWorkflow:
         """Workflow: Agent identifies external links."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -309,7 +309,7 @@ class TestLinkDiscoveryWorkflow:
         """Workflow: Agent explores blog directory structure."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -334,7 +334,7 @@ class TestErrorHandlingWorkflow:
         """Workflow: Agent handles missing pages."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -352,7 +352,7 @@ class TestErrorHandlingWorkflow:
         """Workflow: Agent handles invalid CSS selectors."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -369,7 +369,7 @@ class TestErrorHandlingWorkflow:
     @pytest.mark.asyncio
     async def test_handle_missing_url(self):
         """Workflow: Agent forgets to provide URL."""
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -396,7 +396,7 @@ class TestFullScrapingPipeline:
         base_url = html_fixture_server.base_url
         results = {"pages_analyzed": 0, "total_content_length": 0, "errors": []}
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -455,7 +455,7 @@ class TestFullScrapingPipeline:
             "/japanese.html",
         ]
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -480,7 +480,7 @@ class TestAntiDetectionProfiles:
     @pytest.mark.asyncio
     async def test_stealth_profile_settings(self):
         """Verify stealth profile configuration."""
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -498,7 +498,7 @@ class TestAntiDetectionProfiles:
     @pytest.mark.asyncio
     async def test_balanced_profile_settings(self):
         """Verify balanced profile configuration."""
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -513,7 +513,7 @@ class TestAntiDetectionProfiles:
     @pytest.mark.asyncio
     async def test_none_profile_settings(self):
         """Verify none profile disables anti-detection."""
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -528,7 +528,7 @@ class TestAntiDetectionProfiles:
     @pytest.mark.asyncio
     async def test_custom_profile_settings(self):
         """Verify custom profile with specific settings."""
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -556,7 +556,7 @@ class TestContentExtractionOptions:
         """Test including links in content extraction."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -575,7 +575,7 @@ class TestContentExtractionOptions:
         """Test excluding links from content extraction."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -595,7 +595,7 @@ class TestContentExtractionOptions:
         """Test including images in content extraction."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -617,7 +617,7 @@ class TestStructureAnalysisOptions:
         """Test navigation extraction in structure."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -635,7 +635,7 @@ class TestStructureAnalysisOptions:
         """Test form detection in structure."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
@@ -653,7 +653,7 @@ class TestStructureAnalysisOptions:
         """Test heading outline extraction."""
         base_url = html_fixture_server.base_url
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 

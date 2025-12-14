@@ -41,10 +41,45 @@ target-version = "py311"
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "pyright>=1.1.0",
+    "bandit>=1.7.0",
 ]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/__pycache__/*",
+    "*/test/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+skip_empty = true
+sort = "Cover"
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.bandit]
+exclude_dirs = ["test"]
+skips = ["B101"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

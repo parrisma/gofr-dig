@@ -2,7 +2,7 @@ import pytest
 import json
 import httpx
 from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 MCP_URL = "http://localhost:8030/mcp"
 WEB_URL = "http://localhost:8032"
@@ -34,7 +34,7 @@ class TestSessionFlow:
         # We use a small chunk size to simulate a "large" document relative to the chunk size
         CHUNK_SIZE = 50
 
-        async with streamablehttp_client(MCP_URL) as (read, write, _):
+        async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 

@@ -75,13 +75,6 @@ if __name__ == "__main__":
         default="url",
         help="Proxy response mode: 'guid' returns only proxy_guid, 'url' returns both proxy_guid and full download_url (default: url)",
     )
-    parser.add_argument(
-        "--transport",
-        type=str,
-        choices=["http", "sse"],
-        default="http",
-        help="Transport mode: 'http' for HTTP/REST, 'sse' for Server-Sent Events (default: http)",
-    )
     args = parser.parse_args()
 
     # Create logger for startup messages
@@ -128,7 +121,7 @@ if __name__ == "__main__":
             "Configuration",
             host=args.host,
             port=args.port,
-            transport=args.transport.upper(),
+            transport="HTTP Streamable",
             jwt_enabled=auth_service is not None,
             proxy_mode=args.proxy_url_mode.upper(),
             web_url=args.web_url or "http://localhost:8032",
@@ -137,8 +130,6 @@ if __name__ == "__main__":
         )
         startup_logger.info("=" * 70)
         startup_logger.info(f"MCP endpoint: http://{args.host}:{args.port}/mcp")
-        if args.transport == "sse":
-            startup_logger.info(f"SSE endpoint: http://{args.host}:{args.port}/sse")
         startup_logger.info("=" * 70)
         asyncio.run(main(host=args.host, port=args.port))
         startup_logger.info("=" * 70)

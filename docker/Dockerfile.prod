@@ -1,0 +1,61 @@
+# gofr-dig Production Dockerfile
+# Single-stage build with supervisor for MCP + MCPO + Web servers
+FROM python:3.11-slim
+
+# Install system dependencies and supervisor
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv for fast Python package management
+RUN pip install --no-cache-dir uv
+
+# Create gofr-dig user and group
+RUN groupadd --system gofr-dig && \
+    useradd --system --gid gofr-dig --home-dir /home/gofr-dig --create-home gofr-dig
+
+# Create application directories
+RUN mkdir -p /home/gofr-dig/app \
+    && mkdir -p /home/gofr-dig/data/storage \
+    && mkdir -p /home/gofr-dig/data/auth \
+    && mkdir -p /home/gofr-dig/logs \
+    && mkdir -p /var/log/supervisor \
+    && chown -R gofr-dig:gofr-dig /home/gofr-dig \
+    && chown -R gofr-dig:gofr-dig /var/log/supervisor
+
+WORKDIR /home/gofr-dig
+
+# Copy project files
+COPY --chown=gofr-dig:gofr-dig pyproject.toml /home/gofr-dig/
+COPY --chown=gofr-dig:gofr-dig README.md /home/gofr-dig/
+COPY --chown=gofr-dig:gofr-dig app/ /home/gofr-dig/app/
+COPY --chown=gofr-dig:gofr-dig lib/ /home/gofr-dig/lib/
+
+# Create venv and install dependencies (as root to avoid permission issues)
+RUN uv venv /home/gofr-dig/.venv --python=python3.11
+
+ENV VIRTUAL_ENV=/home/gofr-dig/.venv
+ENV PATH="/home/gofr-dig/.venv/bin:$PATH"
+
+# Install gofr-common from lib/, then the main project
+RUN uv pip install -e ./lib/gofr-common && uv pip install -e .
+
+# Install mcpo for OpenAPI proxy
+RUN uv pip install mcpo
+
+# Fix ownership after installation
+RUN chown -R gofr-dig:gofr-dig /home/gofr-dig
+
+# Copy entrypoint script
+COPY --chown=gofr-dig:gofr-dig docker/entrypoint-prod.sh /home/gofr-dig/entrypoint-prod.sh
+RUN chmod +x /home/gofr-dig/entrypoint-prod.sh
+
+# Expose ports
+# 8030: MCP Server
+# 8031: MCPO Server  
+# 8032: Web Server
+EXPOSE 8030 8031 8032
+
+# Run as root for supervisor (it will manage user processes)
+ENTRYPOINT ["/home/gofr-dig/entrypoint-prod.sh"]
