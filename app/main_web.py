@@ -6,10 +6,10 @@ import os
 import sys
 
 from app.web_server.web_server import GofrDigWebServer
-from app.auth import AuthService
+from gofr_common.auth import AuthService, GroupRegistry, create_stores_from_env
+from gofr_common.auth.config import resolve_auth_config
 from app.logger import Logger, session_logger
 import app.startup.validation
-from app.startup.auth_config import resolve_auth_config
 
 logger: Logger = session_logger
 
@@ -32,8 +32,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_WEB_PORT", "8032")),
-        help="Port number to listen on (default: 8032, or GOFR_DIG_WEB_PORT env var)",
+        default=int(os.environ.get("GOFR_DIG_WEB_PORT", "8072")),
+        help="Port number to listen on (default: 8072, or GOFR_DIG_WEB_PORT env var)",
     )
     parser.add_argument(
         "--jwt-secret",
@@ -55,7 +55,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Validate JWT secret if authentication is enabled
-    jwt_secret, token_store_path = resolve_auth_config(
+    jwt_secret, _token_store_path, require_auth = resolve_auth_config(
+        env_prefix="GOFR_DIG",
         jwt_secret_arg=args.jwt_secret,
         token_store_arg=args.token_store,
         require_auth=not args.no_auth,
@@ -65,11 +66,18 @@ if __name__ == "__main__":
     # Initialize AuthService if authentication is enabled
     auth_service = None
     if jwt_secret:
-        auth_service = AuthService(secret_key=jwt_secret, token_store_path=token_store_path)
+        token_store, group_store = create_stores_from_env(prefix="GOFR_DIG")
+        group_registry = GroupRegistry(store=group_store)
+        auth_service = AuthService(
+            token_store=token_store,
+            group_registry=group_registry,
+            secret_key=jwt_secret,
+            env_prefix="GOFR_DIG",
+        )
         logger.info(
             "Authentication service initialized",
             jwt_enabled=True,
-            token_store=token_store_path,
+            backend=type(token_store).__name__,
         )
     else:
         logger.warning(

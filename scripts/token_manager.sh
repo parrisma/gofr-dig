@@ -45,7 +45,7 @@ export GOFR_PROJECT_ROOT="$GOFR_DIG_ROOT"
 export GOFR_TOKEN_STORE="$GOFR_DIG_TOKEN_STORE"
 export GOFR_ENV="$GOFR_DIG_ENV"
 export GOFR_ENV_VAR_PREFIX="GOFR_DIG"
-export GOFR_TOKEN_MODULE="app.auth.token_manager"
+export GOFR_TOKEN_MODULE="gofr_common.auth.token_manager"
 
 # Call shared script
 source "$COMMON_SCRIPTS/token_manager.sh" "$@"

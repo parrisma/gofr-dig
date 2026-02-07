@@ -72,7 +72,7 @@ class MCPOConfig:
 
 def create_default_config(
     auth_token: Optional[str] = None,
-    mcp_auth_port: int = 8030,
+    mcp_auth_port: int = 8070,
     mcp_public_port: int = 8015,
 ) -> MCPOConfig:
     """
@@ -104,7 +104,7 @@ def create_default_config(
     return config
 
 
-def create_public_only_config(mcp_port: int = 8030) -> MCPOConfig:
+def create_public_only_config(mcp_port: int = 8070) -> MCPOConfig:
     """
     Create MCPO configuration for public (no auth) server only
 

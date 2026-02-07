@@ -163,6 +163,9 @@ Thumbs.db
 *.tmp
 *.bak
 
+# Secrets (symlink to lib/gofr-common/secrets)
+secrets
+
 # Data storage - sessions and documents
 data/sessions/**/*.json
 data/storage/**/*.json

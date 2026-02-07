@@ -1013,7 +1013,7 @@ starlette_app = create_mcp_starlette_app(
 )
 
 
-async def main(host: str = "0.0.0.0", port: int = 8030) -> None:
+async def main(host: str = "0.0.0.0", port: int = 8070) -> None:
     """Run the server."""
     import uvicorn
 

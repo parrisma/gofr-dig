@@ -1,11 +1,15 @@
 import pytest
 import json
 import httpx
+import os
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-MCP_URL = "http://localhost:8030/mcp"
-WEB_URL = "http://localhost:8032"
+HOST = os.environ.get("GOFR_DIG_HOST", "localhost")
+MCP_PORT = os.environ.get("GOFR_DIG_MCP_PORT", "8070")
+WEB_PORT = os.environ.get("GOFR_DIG_WEB_PORT", "8072")
+MCP_URL = f"http://{HOST}:{MCP_PORT}/mcp"
+WEB_URL = f"http://{HOST}:{WEB_PORT}"
 
 def parse_json(result) -> dict:
     if result.content and len(result.content) > 0:

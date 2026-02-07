@@ -6,7 +6,7 @@ FROM gofr-base:latest
 USER root
 
 # Install additional dev tools
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gh \
     openssh-server \
     dnsutils \
@@ -21,6 +21,26 @@ RUN apt-get update && apt-get install -y \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Docker CLI for Docker-in-Docker (DinD) capability
+# This allows running docker commands from within the container
+# by mounting the host's Docker socket
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add gofr user to docker group (group will be created/mapped at runtime)
+# The docker group GID will be set to match the host's docker socket GID
+RUN groupadd -g 999 docker || true \
+    && usermod -aG docker gofr
+
 # Create project directories
 RUN mkdir -p /home/gofr/devroot/gofr-dig/data \
     && mkdir -p /home/gofr/devroot/gofr-common \
@@ -28,7 +48,7 @@ RUN mkdir -p /home/gofr/devroot/gofr-dig/data \
 
 # Copy entrypoint
 COPY docker/entrypoint-dev.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod 755 /entrypoint.sh
 
 WORKDIR /home/gofr/devroot/gofr-dig
 
@@ -38,8 +58,11 @@ RUN mkdir -p /home/gofr/.ssh && chmod 700 /home/gofr/.ssh
 # Create venv (will be populated by entrypoint)
 RUN uv venv /home/gofr/devroot/gofr-dig/.venv --python=python3.11
 
-# Standard GOFR ports (gofr-dig uses 8030-8032)
-EXPOSE 8030 8031 8032
+# Standard GOFR ports (gofr-dig uses 8070-8072)
+ARG GOFR_DIG_MCP_PORT=8070
+ARG GOFR_DIG_MCPO_PORT=8071
+ARG GOFR_DIG_WEB_PORT=8072
+EXPOSE $GOFR_DIG_MCP_PORT $GOFR_DIG_MCPO_PORT $GOFR_DIG_WEB_PORT
 
 USER gofr
 ENTRYPOINT ["/entrypoint.sh"]

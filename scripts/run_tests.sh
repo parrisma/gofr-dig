@@ -67,6 +67,12 @@ if [ -f "${SCRIPT_DIR}/gofr-dig.env" ]; then
     source "${SCRIPT_DIR}/gofr-dig.env"
 fi
 
+# Load centralized port config (single source of truth)
+PORTS_ENV="${PROJECT_ROOT}/lib/gofr-common/config/gofr_ports.env"
+if [ -f "${PORTS_ENV}" ]; then
+    source "${PORTS_ENV}"
+fi
+
 # Set up PYTHONPATH for gofr-common discovery
 if [ -d "${PROJECT_ROOT}/lib/gofr-common/src" ]; then
     export PYTHONPATH="${PROJECT_ROOT}:${PROJECT_ROOT}/lib/gofr-common/src:${PYTHONPATH:-}"
@@ -76,11 +82,13 @@ else
     export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 fi
 
-# Test configuration - override ports from gofr-dig.env for testing
+# Test configuration
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_TOKEN_STORE="${LOG_DIR}/${PROJECT_NAME}_tokens_test.json"
-export GOFR_DIG_MCP_PORT="8030"
-export GOFR_DIG_WEB_PORT="8032"
+export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-memory}"
+export GOFR_DIG_HOST="${GOFR_DIG_HOST:-localhost}"
+export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:-8070}"
+export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:-8072}"
 
 # Ensure directories exist
 mkdir -p "${LOG_DIR}"
@@ -161,8 +169,7 @@ start_mcp_server() {
 
     nohup uv run python app/main_mcp.py \
         --port "${GOFR_DIG_MCP_PORT}" \
-        --jwt-secret "${GOFR_DIG_JWT_SECRET}" \
-        --token-store "${GOFR_DIG_TOKEN_STORE}" \
+        --no-auth \
         > "${log_file}" 2>&1 &
     MCP_PID=$!
     echo "MCP PID: ${MCP_PID}"
@@ -195,8 +202,7 @@ start_web_server() {
 
     nohup uv run python app/main_web.py \
         --port "${GOFR_DIG_WEB_PORT}" \
-        --jwt-secret "${GOFR_DIG_JWT_SECRET}" \
-        --token-store "${GOFR_DIG_TOKEN_STORE}" \
+        --no-auth \
         > "${log_file}" 2>&1 &
     WEB_PID=$!
     echo "Web PID: ${WEB_PID}"
@@ -233,6 +239,7 @@ RUN_INTEGRATION=false
 RUN_ALL=false
 STOP_ONLY=false
 CLEANUP_ONLY=false
+PORT_OFFSET=0
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -259,6 +266,14 @@ while [[ $# -gt 0 ]]; do
             RUN_INTEGRATION=true
             START_SERVERS=true
             shift
+            ;;
+        --port-offset)
+            PORT_OFFSET="$2"
+            if ! [[ "$PORT_OFFSET" =~ ^[0-9]+$ ]]; then
+                echo "Error: --port-offset requires a numeric value"
+                exit 1
+            fi
+            shift 2
             ;;
         --all)
             RUN_ALL=true
@@ -290,6 +305,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --coverage-html  Run with HTML coverage report"
             echo "  --unit           Run unit tests only (no servers)"
             echo "  --integration    Run integration tests (with servers)"
+            echo "  --port-offset N  Offset MCP/Web ports by N (avoid conflicts)"
             echo "  --all            Run all test categories"
             echo "  --no-servers     Don't start test servers"
             echo "  --with-servers   Start test servers (default)"
@@ -310,6 +326,13 @@ done
 # =============================================================================
 
 print_header
+
+# Apply port offset if requested
+if [ "$PORT_OFFSET" -gt 0 ]; then
+    export GOFR_DIG_MCP_PORT=$((GOFR_DIG_MCP_PORT + PORT_OFFSET))
+    export GOFR_DIG_WEB_PORT=$((GOFR_DIG_WEB_PORT + PORT_OFFSET))
+    echo -e "${BLUE}Ports offset by +${PORT_OFFSET} (MCP=${GOFR_DIG_MCP_PORT}, Web=${GOFR_DIG_WEB_PORT})${NC}"
+fi
 
 # Handle stop-only mode
 if [ "$STOP_ONLY" = true ]; then
@@ -364,7 +387,7 @@ if [ "$USE_DOCKER" = true ]; then
     # Docker execution
     if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         echo -e "${RED}Container ${CONTAINER_NAME} is not running.${NC}"
-        echo "Run: ./docker/run-dev.sh to create it"
+        echo "Run: ./docker/start-dev.sh to create it"
         exit 1
     fi
     

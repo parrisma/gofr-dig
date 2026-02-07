@@ -62,9 +62,9 @@ GOFR-DIG is structured as a modular MCP server with clear separation of concerns
 
 | Module | Purpose | Port |
 |--------|---------|------|
-| `main_mcp.py` | Pure MCP server (stdio or SSE) | 8030 |
-| `main_mcpo.py` | MCP with OpenAPI wrapper | 8031 |
-| `main_web.py` | Web server (REST API) | 8032 |
+| `main_mcp.py` | Pure MCP server (stdio or SSE) | 8070 |
+| `main_mcpo.py` | MCP with OpenAPI wrapper | 8071 |
+| `main_web.py` | Web server (REST API) | 8072 |
 
 ### Core Modules
 

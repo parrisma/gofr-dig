@@ -1,0 +1,143 @@
+# GOFR-DIG Docker Compose - Test / Dev Stack (Ephemeral)
+#
+# Port Configuration:
+#   All ports defined in lib/gofr-common/config/gofr_ports.env
+#   gofr-dig = 8070 (MCP) / 8071 (MCPO) / 8072 (Web)
+#
+# Usage:
+#   cd docker
+#   docker compose -f compose.dev.yml up -d       # Start all services
+#   docker compose -f compose.dev.yml logs -f      # Follow logs
+#   docker compose -f compose.dev.yml down          # Stop and remove
+#
+# Services (Ephemeral — no persistent volumes):
+#   - mcp:   MCP Server (Streamable HTTP)  — port ${GOFR_DIG_MCP_PORT}  (8070)
+#   - mcpo:  MCPO Server (OpenAPI wrapper) — port ${GOFR_DIG_MCPO_PORT} (8071)
+#   - web:   Web Server (REST API)         — port ${GOFR_DIG_WEB_PORT}  (8072)
+
+name: gofr-dig-test
+
+x-gofr-ports: &gofr_ports
+  env_file:
+    - ../lib/gofr-common/config/gofr_ports.env
+
+# Shared settings for all gofr-dig application services
+x-gofr-dig-common: &gofr_dig_common
+  <<: *gofr_ports
+  image: gofr-dig-prod:latest
+  restart: "no"
+  networks:
+    - gofr-test-net
+
+services:
+  # ==========================================================================
+  # 1. MCP Server (Core Logic)
+  # ==========================================================================
+  mcp:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-mcp-test
+    hostname: gofr-dig-mcp-test
+    user: root
+    working_dir: /home/gofr-dig
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
+        chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
+        exec su -s /bin/bash gofr-dig -c '/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port ${GOFR_DIG_MCP_PORT} --no-auth'
+    environment:
+      - GOFR_DIG_ENV=TEST
+      - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-DEBUG}
+      - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
+      - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
+      # Auth backend (vault, file, or memory) — set by start-dev.sh if auth enabled
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-memory}
+      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
+      - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
+    ports:
+      - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT}}:${GOFR_DIG_MCP_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    # No persistent volumes — ephemeral
+
+  # ==========================================================================
+  # 2. MCPO Server (OpenAPI Wrapper)
+  # ==========================================================================
+  mcpo:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-mcpo-test
+    hostname: gofr-dig-mcpo-test
+    user: gofr-dig
+    working_dir: /home/gofr-dig
+    entrypoint: []
+    depends_on:
+      mcp:
+        condition: service_healthy
+    command: >
+      /home/gofr-dig/.venv/bin/mcpo
+      --host 0.0.0.0 --port ${GOFR_DIG_MCPO_PORT} --server-type streamable-http
+      -- http://gofr-dig-mcp-test:${GOFR_DIG_MCP_PORT}/mcp
+    environment:
+      - GOFR_DIG_ENV=TEST
+      - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
+      - GOFR_DIG_MCPO_PORT=${GOFR_DIG_MCPO_PORT}
+    ports:
+      - "${GOFR_DIG_MCPO_HOST_PORT:-${GOFR_DIG_MCPO_PORT}}:${GOFR_DIG_MCPO_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCPO_PORT}/openapi.json || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # 3. Web Server (REST API)
+  # ==========================================================================
+  web:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-web-test
+    hostname: gofr-dig-web-test
+    user: gofr-dig
+    working_dir: /home/gofr-dig
+    entrypoint: []
+    command: >
+      /home/gofr-dig/.venv/bin/python -m app.main_web
+      --host 0.0.0.0 --port ${GOFR_DIG_WEB_PORT} --no-auth
+    environment:
+      - GOFR_DIG_ENV=TEST
+      - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-DEBUG}
+      # Auth backend — same as MCP
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-memory}
+      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
+      - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
+    ports:
+      - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT}}:${GOFR_DIG_WEB_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ==========================================================================
+# Networks — Test Network (isolated from production)
+# ==========================================================================
+networks:
+  gofr-test-net:
+    name: gofr-test-net
+    external: true
+    # Create manually if needed: docker network create gofr-test-net
+
+# ==========================================================================
+# No Volumes — All services use ephemeral storage
+# ==========================================================================

@@ -1,1 +1,14 @@
-{}
+{
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJncm91cCI6ImFkbWluIiwiaWF0IjoxNzcwNDE3MTU4LCJleHAiOjE3NzA1MDM1NTgsIm5iZiI6MTc3MDQxNzE1OCwiYXVkIjoiZ29mci1hcGkifQ.vtCwFidQHw0JW6STD3jHG3RwRe-q8r3QcrOmcJljyWM": {
+    "group": "admin",
+    "issued_at": "2026-02-06T22:32:38.748088",
+    "expires_at": "2026-02-07T22:32:38.748088",
+    "not_before": "2026-02-06T22:32:38.748088"
+  },
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJncm91cCI6InJlc2VhcmNoIiwiaWF0IjoxNzcwNDE3MjA3LCJleHAiOjE3NzA0MjA4MDcsIm5iZiI6MTc3MDQxNzIwNywiYXVkIjoiZ29mci1hcGkifQ.x6zzblmZ_otREy1mI0XdT27H3yEmL3WJn-dyZs9R7eM": {
+    "group": "research",
+    "issued_at": "2026-02-06T22:33:27.530509",
+    "expires_at": "2026-02-06T23:33:27.530509",
+    "not_before": "2026-02-06T22:33:27.530509"
+  }
+}

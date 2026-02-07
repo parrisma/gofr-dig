@@ -1,0 +1,189 @@
+# GOFR-DIG Docker Compose - Production Stack
+#
+# Port Configuration:
+#   All ports defined in lib/gofr-common/config/gofr_ports.env
+#   gofr-dig = 8070 (MCP) / 8071 (MCPO) / 8072 (Web)
+#
+# Usage:
+#   Use start-prod.sh to start production stack (recommended):
+#     ./docker/start-prod.sh               # Auto-builds image, starts stack
+#     ./docker/start-prod.sh --no-auth     # Start without JWT authentication
+#     ./docker/start-prod.sh --port-offset 100  # Use ports 8170-8172 instead
+#     ./docker/start-prod.sh --build       # Force-rebuild image first
+#
+#   Or manually:
+#     cd docker
+#     set -a && source ../lib/gofr-common/config/gofr_ports.env && set +a
+#     export GOFR_DIG_JWT_SECRET=$(openssl rand -hex 32)
+#     docker compose -f compose.prod.yml up -d
+#
+# Services:
+#   - mcp:   MCP Server (Streamable HTTP)  — port ${GOFR_DIG_MCP_PORT}  (8070)
+#   - mcpo:  MCPO Server (OpenAPI wrapper) — port ${GOFR_DIG_MCPO_PORT} (8071)
+#   - web:   Web Server (REST API)         — port ${GOFR_DIG_WEB_PORT}  (8072)
+
+name: gofr-dig
+
+x-gofr-ports: &gofr_ports
+  env_file:
+    - ../lib/gofr-common/config/gofr_ports.env
+
+# Shared settings for all gofr-dig application services
+x-gofr-dig-common: &gofr_dig_common
+  <<: *gofr_ports
+  image: gofr-dig-prod:latest
+  restart: unless-stopped
+  networks:
+    - gofr-net
+
+services:
+  # ==========================================================================
+  # 1. MCP Server (Core Logic)
+  # ==========================================================================
+  mcp:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-mcp
+    hostname: gofr-dig-mcp
+    user: root
+    working_dir: /home/gofr-dig
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
+        chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
+        AUTH_FLAG=""
+        [ "$${GOFR_DIG_NO_AUTH}" = "1" ] && AUTH_FLAG="--no-auth"
+        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port $${GOFR_DIG_MCP_PORT} $${AUTH_FLAG}"
+    environment:
+      - GOFR_DIG_ENV=PROD
+      - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-mcp.log
+      - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
+      - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
+      # Auth — passed through from host environment or start-prod.sh
+      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_DIG_TOKEN_STORE=${GOFR_DIG_TOKEN_STORE:-/home/gofr-dig/data/auth/tokens.json}
+      - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
+      # Auth backend (vault, file, or memory)
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
+      - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
+      # Neo4j (optional)
+      - NEO4J_URI=${NEO4J_URI:-bolt://gofr-neo4j:7687}
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+    ports:
+      - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT}}:${GOFR_DIG_MCP_PORT}"
+    volumes:
+      - gofr-dig-data:/home/gofr-dig/data
+      - gofr-dig-prod-logs:/home/gofr-dig/logs
+      - ${GOFR_DIG_VAULT_CREDS:-/dev/null}:/run/secrets/vault_creds:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # 2. MCPO Server (OpenAPI Wrapper)
+  # ==========================================================================
+  mcpo:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-mcpo
+    hostname: gofr-dig-mcpo
+    user: gofr-dig
+    working_dir: /home/gofr-dig
+    entrypoint: []
+    depends_on:
+      mcp:
+        condition: service_healthy
+    command: >
+      /home/gofr-dig/.venv/bin/mcpo
+      --host 0.0.0.0 --port ${GOFR_DIG_MCPO_PORT} --server-type streamable-http
+      -- http://gofr-dig-mcp:${GOFR_DIG_MCP_PORT}/mcp
+    environment:
+      - GOFR_DIG_ENV=PROD
+      - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
+      - GOFR_DIG_MCPO_PORT=${GOFR_DIG_MCPO_PORT}
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-mcpo.log
+    ports:
+      - "${GOFR_DIG_MCPO_HOST_PORT:-${GOFR_DIG_MCPO_PORT}}:${GOFR_DIG_MCPO_PORT}"
+    volumes:
+      - gofr-dig-prod-logs:/home/gofr-dig/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCPO_PORT}/openapi.json || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # 3. Web Server (REST API)
+  # ==========================================================================
+  web:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-web
+    hostname: gofr-dig-web
+    user: root
+    working_dir: /home/gofr-dig
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /home/gofr-dig/logs
+        chown -R gofr-dig:gofr-dig /home/gofr-dig/logs
+        AUTH_FLAG=""
+        [ "$${GOFR_DIG_NO_AUTH}" = "1" ] && AUTH_FLAG="--no-auth"
+        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_web --host 0.0.0.0 --port $${GOFR_DIG_WEB_PORT} $${AUTH_FLAG}"
+    environment:
+      - GOFR_DIG_ENV=PROD
+      - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-web.log
+      - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
+      - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
+      # Auth — same as MCP
+      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_DIG_TOKEN_STORE=${GOFR_DIG_TOKEN_STORE:-/home/gofr-dig/data/auth/tokens.json}
+      - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
+      # Auth backend (vault, file, or memory)
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
+      - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
+    ports:
+      - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT}}:${GOFR_DIG_WEB_PORT}"
+    volumes:
+      - gofr-dig-data:/home/gofr-dig/data
+      - gofr-dig-prod-logs:/home/gofr-dig/logs
+      - ${GOFR_DIG_VAULT_CREDS:-/dev/null}:/run/secrets/vault_creds:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  gofr-net:
+    name: gofr-net
+    external: true
+    # Network is shared across all GOFR production services
+    # Create manually if needed: docker network create gofr-net
+
+# ==========================================================================
+# Volumes — Persistent
+# ==========================================================================
+volumes:
+  gofr-dig-data:
+    name: gofr-dig-data
+    external: false
+  gofr-dig-prod-logs:
+    name: gofr-dig-prod-logs
+    external: false

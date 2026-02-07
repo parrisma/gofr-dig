@@ -1,0 +1,256 @@
+# GOFR-IQ Docker Compose - Complete Production Stack
+#
+# Port Configuration:
+#   All ports defined in lib/gofr-common/config/gofr_ports.env
+#   Must be exported to environment before running docker compose
+# 
+# OpenWebUI Integration:
+#   OpenWebUI connects to MCPO which exposes MCP tools as REST endpoints.
+#   Configure OpenWebUI to use: http://localhost:${GOFR_IQ_MCPO_PORT}
+#
+# Usage:
+#   Use start-prod.sh to start production stack (recommended)
+#   OR manually:
+#     cd docker
+#     set -a && source ../lib/gofr-common/config/gofr_ports.env && set +a
+#     docker compose up -d
+#
+# Services:
+#   - neo4j:    Graph Database - ports ${GOFR_NEO4J_HTTP_PORT}, ${GOFR_NEO4J_BOLT_PORT}
+#   - chromadb: Vector Database - port ${GOFR_CHROMA_PORT}
+#   - mcp:      MCP Server (Core Logic) - port ${GOFR_IQ_MCP_PORT}
+#   - mcpo:     MCPO Server (OpenAPI for OpenWebUI) - port ${GOFR_IQ_MCPO_PORT}
+#   - web:      Web Server (Health Check Only) - port ${GOFR_IQ_WEB_PORT}
+
+name: gofr-iq
+
+x-gofr-ports: &gofr_ports
+  env_file:
+    - ../lib/gofr-common/config/gofr_ports.env
+
+services:
+  # ============================================================================
+  # INFRASTRUCTURE (Shared, external Vault consumed)
+  # ============================================================================
+
+  neo4j:
+    <<: *gofr_ports
+    image: gofr-iq-neo4j:latest
+    container_name: gofr-neo4j
+    hostname: gofr-neo4j
+    restart: unless-stopped
+    ports:
+      - "${GOFR_NEO4J_HTTP_PORT}:7474"
+      - "${GOFR_NEO4J_BOLT_PORT}:7687"
+    volumes:
+      - gofr-iq-neo4j-data:/data
+      - gofr-iq-neo4j-logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD}
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=1G
+    networks:
+      - gofr-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:${GOFR_NEO4J_HTTP_INTERNAL_PORT}"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  chromadb:
+    <<: *gofr_ports
+    image: gofr-iq-chromadb:latest
+    container_name: gofr-chromadb
+    hostname: gofr-chromadb
+    restart: unless-stopped
+    ports:
+      - "${GOFR_CHROMA_PORT}:8000"
+    volumes:
+      - gofr-iq-chroma-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    networks:
+      - gofr-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${GOFR_CHROMA_INTERNAL_PORT}/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  # ==========================================================================
+  # 1. MCP Server (Core Logic)
+  # ==========================================================================
+  mcp:
+    <<: *gofr_ports
+    image: gofr-iq-prod:latest
+    container_name: gofr-iq-mcp
+    hostname: gofr-iq-mcp
+    restart: unless-stopped
+    user: gofr-iq
+    working_dir: /home/gofr-iq
+    entrypoint: []
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    command: >
+      /home/gofr-iq/.venv/bin/python -m app.main_mcp
+      --host 0.0.0.0 --port ${GOFR_IQ_MCP_PORT}
+    environment:
+      - GOFR_IQ_ENV=PROD
+      - GOFR_IQ_MCP_PORT=${GOFR_IQ_MCP_PORT}
+      - GOFR_IQ_LOG_LEVEL=${GOFR_IQ_LOG_LEVEL:-INFO}
+      - GOFR_IQ_LOG_FILE=/home/gofr-iq/logs/gofr-iq-mcp.log
+      - GOFR_IQ_AUTH_DISABLED=false
+      # JWT Secret and Neo4j password loaded from Vault via AppRole (Zero-Trust Bootstrap)
+      - GOFR_IQ_JWT_SECRET=${GOFR_IQ_JWT_SECRET}
+      - GOFR_IQ_NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      # Auth Backend (Vault) - shared across all GOFR services
+      - GOFR_AUTH_BACKEND=vault
+      - GOFR_VAULT_URL=http://gofr-vault:${GOFR_VAULT_PORT}
+      - GOFR_VAULT_TOKEN=${VAULT_ROOT_TOKEN:-gofr-dev-root-token}
+      - GOFR_VAULT_PATH_PREFIX=gofr/auth
+      - GOFR_VAULT_MOUNT_POINT=secret
+      # Infrastructure connections
+      - GOFR_IQ_CHROMADB_HOST=gofr-chromadb
+      - GOFR_IQ_CHROMADB_PORT=${GOFR_CHROMA_INTERNAL_PORT}
+      - GOFR_IQ_NEO4J_URI=bolt://gofr-neo4j:${GOFR_NEO4J_BOLT_INTERNAL_PORT}
+      - GOFR_IQ_NEO4J_USER=neo4j
+      # LLM Configuration
+      - GOFR_IQ_OPENROUTER_API_KEY=${GOFR_IQ_OPENROUTER_API_KEY:-}
+      - GOFR_IQ_OPENROUTER_BASE_URL=${GOFR_IQ_OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      - GOFR_IQ_LLM_MODEL=${GOFR_IQ_LLM_MODEL:-meta-llama/llama-3.1-70b-instruct}
+      - GOFR_IQ_EMBEDDING_MODEL=${GOFR_IQ_EMBEDDING_MODEL:-qwen/qwen3-embedding-8b}
+      - GOFR_IQ_LLM_TIMEOUT=${GOFR_IQ_LLM_TIMEOUT:-60}
+      - GOFR_IQ_LLM_MAX_RETRIES=${GOFR_IQ_LLM_MAX_RETRIES:-3}
+    ports:
+      - "${GOFR_IQ_MCP_PORT}:${GOFR_IQ_MCP_PORT}"
+    volumes:
+      - gofr-iq-data:/home/gofr-iq/data
+      - gofr-iq-prod-logs:/home/gofr-iq/logs
+      # AppRole credentials (Zero-Trust Bootstrap)
+      # Path goes through lib/gofr-common/secrets (canonical location)
+      - ${HOST_PROJECT_ROOT:-..}/lib/gofr-common/secrets/service_creds/gofr-mcp.json:/run/secrets/vault_creds:ro
+    networks:
+      - gofr-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_IQ_MCP_PORT}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # 2. MCPO Server (OpenAPI Wrapper)
+  # ==========================================================================
+  mcpo:
+    <<: *gofr_ports
+    image: gofr-iq-prod:latest
+    container_name: gofr-iq-mcpo
+    hostname: gofr-iq-mcpo
+    restart: unless-stopped
+    user: gofr-iq
+    working_dir: /home/gofr-iq
+    entrypoint: []
+    depends_on:
+      mcp:
+        condition: service_healthy
+    command: >
+      /home/gofr-iq/.venv/bin/mcpo
+      --host 0.0.0.0 --port ${GOFR_IQ_MCPO_PORT} --server-type streamable-http
+      -- http://gofr-iq-mcp:${GOFR_IQ_MCP_PORT}/mcp
+    environment:
+      - GOFR_IQ_ENV=PROD
+      - GOFR_IQ_MCP_PORT=${GOFR_IQ_MCP_PORT}
+      - GOFR_IQ_MCPO_PORT=${GOFR_IQ_MCPO_PORT}
+      - GOFR_IQ_LOG_LEVEL=${GOFR_IQ_LOG_LEVEL:-INFO}
+      - GOFR_IQ_LOG_FILE=/home/gofr-iq/logs/gofr-iq-mcpo.log
+    ports:
+      - "${GOFR_IQ_MCPO_PORT}:${GOFR_IQ_MCPO_PORT}"
+    volumes:
+      - gofr-iq-prod-logs:/home/gofr-iq/logs
+    networks:
+      - gofr-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_IQ_MCPO_PORT}/openapi.json || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # ==========================================================================
+  # 3. Web Server (Health Check Only)
+  # ==========================================================================
+  web:
+    <<: *gofr_ports
+    image: gofr-iq-prod:latest
+    container_name: gofr-iq-web
+    hostname: gofr-iq-web
+    restart: unless-stopped
+    user: gofr-iq
+    working_dir: /home/gofr-iq
+    entrypoint: []
+    command: >
+      /home/gofr-iq/.venv/bin/python -m app.main_web
+      --host 0.0.0.0 --port ${GOFR_IQ_WEB_PORT}
+    environment:
+      - GOFR_IQ_ENV=PROD
+      - GOFR_IQ_WEB_PORT=${GOFR_IQ_WEB_PORT}
+      - GOFR_IQ_LOG_LEVEL=${GOFR_IQ_LOG_LEVEL:-INFO}
+      - GOFR_IQ_LOG_FILE=/home/gofr-iq/logs/gofr-iq-web.log
+    ports:
+      - "${GOFR_IQ_WEB_PORT}:${GOFR_IQ_WEB_PORT}"
+    volumes:
+      # AppRole credentials (Zero-Trust Bootstrap)
+      # Path goes through lib/gofr-common/secrets (canonical location)
+      - ${HOST_PROJECT_ROOT:-..}/lib/gofr-common/secrets/service_creds/gofr-web.json:/run/secrets/vault_creds:ro
+      - gofr-iq-prod-logs:/home/gofr-iq/logs
+    networks:
+      - gofr-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_IQ_WEB_PORT}/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+# ==========================================================================
+# Networks
+# ==========================================================================
+networks:
+  gofr-net:
+    name: gofr-net
+    external: true
+    # Network is shared across dev container, infra scripts, and compose
+    # Create manually if needed: docker network create gofr-net
+
+# ==========================================================================
+# Volumes - Persistent
+# ==========================================================================
+# Volumes
+# ==========================================================================
+volumes:
+  gofr-iq-neo4j-data:
+    name: gofr-iq-neo4j-data
+    external: false
+  gofr-iq-neo4j-logs:
+    name: gofr-iq-neo4j-logs
+    external: false
+  gofr-iq-chroma-data:
+    name: gofr-iq-chroma-data
+    external: false
+  gofr-iq-data:
+    name: gofr-iq-data
+    external: false
+  gofr-iq-backups:
+    name: gofr-iq-backups
+    external: false
+  gofr-iq-prod-logs:
+    name: gofr-iq-prod-logs

@@ -18,10 +18,10 @@
 uv pip install -e .
 
 # Start MCP server
-python -m app.main_mcp --port 8030
+python -m app.main_mcp --port 8070
 
 # Start with authentication
-python -m app.main_mcp --port 8030 --jwt-secret "your-secret-key"
+python -m app.main_mcp --port 8070 --jwt-secret "your-secret-key"
 ```
 
 ## MCP Tools

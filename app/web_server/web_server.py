@@ -12,7 +12,7 @@ from gofr_common.web import (
     create_ping_response,
     create_health_response,
 )
-from app.auth import AuthService
+from gofr_common.auth import AuthService
 from app.session.manager import SessionManager
 from app.config import Config
 
@@ -26,7 +26,7 @@ class GofrDigWebServer:
         self,
         auth_service: Optional[AuthService] = None,
         host: str = "0.0.0.0",
-        port: int = 8032,
+        port: int = 8072,
     ):
         self.auth_service = auth_service
         self.host = host

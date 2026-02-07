@@ -12,6 +12,17 @@ echo "======================================================================="
 echo "GOFR-DIG Container Entrypoint"
 echo "======================================================================="
 
+# Fix Docker socket GID mismatch (silence "cannot find name for group ID" warning)
+# When --group-add GID is used, the numeric GID may not have a name in /etc/group
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    if ! getent group "$DOCKER_SOCK_GID" >/dev/null 2>&1; then
+        echo "Creating docker group with GID $DOCKER_SOCK_GID to match host socket..."
+        sudo groupadd -g "$DOCKER_SOCK_GID" docker 2>/dev/null || true
+        sudo usermod -aG docker "$GOFR_USER" 2>/dev/null || true
+    fi
+fi
+
 # Fix data directory permissions if mounted as volume
 if [ -d "$PROJECT_DIR/data" ]; then
     if [ ! -w "$PROJECT_DIR/data" ]; then

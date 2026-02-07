@@ -1,22 +1,19 @@
 #!/bin/bash
-# Stop gofr-dig production container gracefully
+# Stop gofr-dig production stack gracefully
 set -e
 
-CONTAINER_NAME="gofr-dig-prod"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_FILE="$SCRIPT_DIR/compose.prod.yml"
+PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
 
-echo "Stopping ${CONTAINER_NAME}..."
-
-if docker ps -q -f name=${CONTAINER_NAME} | grep -q .; then
-    docker stop -t 30 ${CONTAINER_NAME}
-    echo "Container stopped"
-else
-    echo "Container is not running"
+# Source ports so compose can resolve variables
+if [ -f "$PORTS_ENV" ]; then
+    set -a && source "$PORTS_ENV" && set +a
 fi
 
-# Optionally remove the container
-if [ "$1" = "--rm" ]; then
-    if docker ps -aq -f name=${CONTAINER_NAME} | grep -q .; then
-        docker rm ${CONTAINER_NAME}
-        echo "Container removed"
-    fi
-fi
+echo "Stopping gofr-dig production stack..."
+
+docker compose -f "$COMPOSE_FILE" down "$@"
+
+echo "Stack stopped"

@@ -2,10 +2,10 @@ import argparse
 import os
 import sys
 import asyncio
-from app.auth import AuthService
+from gofr_common.auth import AuthService, GroupRegistry, create_stores_from_env
+from gofr_common.auth.config import resolve_auth_config
 from app.logger import Logger, session_logger
 import app.startup.validation
-from app.startup.auth_config import resolve_auth_config
 
 logger: Logger = session_logger
 
@@ -30,8 +30,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_MCP_PORT", "8030")),
-        help="Port number to listen on (default: 8030, or GOFR_DIG_MCP_PORT env var)",
+        default=int(os.environ.get("GOFR_DIG_MCP_PORT", "8070")),
+        help="Port number to listen on (default: 8070, or GOFR_DIG_MCP_PORT env var)",
     )
     parser.add_argument(
         "--jwt-secret",
@@ -66,7 +66,7 @@ if __name__ == "__main__":
         "--web-url",
         type=str,
         default=None,
-        help="Web server base URL for proxy mode (default: http://localhost:8032, or GOFR_DIG_WEB_URL env var)",
+        help="Web server base URL for proxy mode (default: http://localhost:8072, or GOFR_DIG_WEB_URL env var)",
     )
     parser.add_argument(
         "--proxy-url-mode",
@@ -81,7 +81,8 @@ if __name__ == "__main__":
     startup_logger: Logger = session_logger
 
     # Resolve authentication configuration
-    jwt_secret, token_store_path = resolve_auth_config(
+    jwt_secret, _token_store_path, require_auth = resolve_auth_config(
+        env_prefix="GOFR_DIG",
         jwt_secret_arg=args.jwt_secret,
         token_store_arg=args.token_store,
         require_auth=not args.no_auth,
@@ -91,11 +92,18 @@ if __name__ == "__main__":
     # Initialize auth service only if auth is required
     auth_service = None
     if jwt_secret:
-        auth_service = AuthService(secret_key=jwt_secret, token_store_path=token_store_path)
+        token_store, group_store = create_stores_from_env(prefix="GOFR_DIG")
+        group_registry = GroupRegistry(store=group_store)
+        auth_service = AuthService(
+            token_store=token_store,
+            group_registry=group_registry,
+            secret_key=jwt_secret,
+            env_prefix="GOFR_DIG",
+        )
         startup_logger.info(
             "Authentication service initialized",
             jwt_enabled=True,
-            token_store=token_store_path,
+            backend=type(token_store).__name__,
         )
     else:
         startup_logger.warning(
@@ -124,7 +132,7 @@ if __name__ == "__main__":
             transport="HTTP Streamable",
             jwt_enabled=auth_service is not None,
             proxy_mode=args.proxy_url_mode.upper(),
-            web_url=args.web_url or "http://localhost:8032",
+            web_url=args.web_url or "http://localhost:8072",
             templates_dir=args.templates_dir or "(default)",
             styles_dir=args.styles_dir or "(default)",
         )

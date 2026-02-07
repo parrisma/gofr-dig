@@ -18,11 +18,11 @@ GOFR_GID=1000
 CONTAINER_NAME="gofr-dig-dev"
 IMAGE_NAME="gofr-dig-dev:latest"
 
-# Defaults from environment or hardcoded (gofr-dig uses 8030-8032)
-MCP_PORT="${GOFRDIG_MCP_PORT:-8030}"
-MCPO_PORT="${GOFRDIG_MCPO_PORT:-8031}"
-WEB_PORT="${GOFRDIG_WEB_PORT:-8032}"
-DOCKER_NETWORK="${GOFRDIG_DOCKER_NETWORK:-gofr-net}"
+# Defaults from environment or hardcoded (gofr-dig uses 8070-8072)
+MCP_PORT="${GOFRDIG_MCP_PORT:-8070}"
+MCPO_PORT="${GOFRDIG_MCPO_PORT:-8071}"
+WEB_PORT="${GOFRDIG_WEB_PORT:-8072}"
+DOCKER_NETWORK="${GOFRDIG_DOCKER_NETWORK:-gofr-test-net}"
 
 # Parse command line arguments
 while [ $# -gt 0 ]; do
@@ -79,15 +79,27 @@ if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
 fi
 
+# Detect Docker socket GID for group mapping
+DOCKER_SOCKET="/var/run/docker.sock"
+DOCKER_GID_ARGS=""
+if [ -S "$DOCKER_SOCKET" ]; then
+    DOCKER_GID=$(stat -c '%g' "$DOCKER_SOCKET")
+    echo "Docker socket GID: $DOCKER_GID"
+    DOCKER_GID_ARGS="-v $DOCKER_SOCKET:$DOCKER_SOCKET:rw --group-add $DOCKER_GID"
+else
+    echo "Warning: Docker socket not found at $DOCKER_SOCKET - docker commands will not work inside container"
+fi
+
 # Run container
 docker run -d \
     --name "$CONTAINER_NAME" \
     --network "$DOCKER_NETWORK" \
-    -p ${MCP_PORT}:8030 \
-    -p ${MCPO_PORT}:8031 \
-    -p ${WEB_PORT}:8032 \
+    -p ${MCP_PORT}:8070 \
+    -p ${MCPO_PORT}:8071 \
+    -p ${WEB_PORT}:8072 \
     -v "$PROJECT_ROOT:/home/gofr/devroot/gofr-dig:rw" \
     -v ${VOLUME_NAME}:/home/gofr/devroot/gofr-dig/data:rw \
+    $DOCKER_GID_ARGS \
     -e GOFRDIG_ENV=development \
     -e GOFRDIG_DEBUG=true \
     -e GOFRDIG_LOG_LEVEL=DEBUG \
@@ -102,6 +114,8 @@ echo "Ports:"
 echo "  - $MCP_PORT: MCP server"
 echo "  - $MCPO_PORT: MCPO proxy"
 echo "  - $WEB_PORT: Web interface"
+echo ""
+echo "Docker: $( [ -n "$DOCKER_GID_ARGS" ] && echo 'socket mounted (DinD ready)' || echo 'socket NOT mounted' )"
 echo ""
 echo "Useful commands:"
 echo "  docker logs -f $CONTAINER_NAME          # Follow logs"

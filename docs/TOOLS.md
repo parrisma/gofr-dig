@@ -1,3 +1,245 @@
+# GOFR-DIG MCP Integration Guide (for UI/LLM)
+
+This section explains what GOFR-DIG is, how to call its MCP tools, and how to design a UI that exposes all features for testing before integrating into automated workflows (e.g., n8n).
+
+## What is GOFR-DIG?
+
+GOFR-DIG is a web scraping and page-structure analysis service exposed via MCP tools. It can:
+
+- Fetch and extract readable text from a page (with optional crawling depth).
+- Analyze page structure to discover sections, navigation, and forms.
+- Apply anti-detection settings (headers, rate limits, robots.txt behavior).
+- Store large results in server-side sessions and retrieve them in chunks.
+
+The MCP surface is intentionally small and consistent, so an LLM-driven UI can present a single “scrape session” workflow with controls for each step.
+
+## MCP Tools (Overview)
+
+All MCP calls are tool invocations with a JSON `args` object. The main tools are:
+
+- `ping`
+- `hello_world`
+- `set_antidetection`
+- `get_structure`
+- `get_content`
+- `get_session_info`
+- `get_session_chunk`
+
+## Standard Response Shapes
+
+### Success (general)
+
+Most tools return a JSON object with `success: true` and tool-specific fields.
+
+### Error (standardized)
+
+```json
+{
+  "success": false,
+  "error_code": "ERROR_CODE",
+  "message": "Human-readable message",
+  "details": {"context": "..."},
+  "recovery_strategy": "Suggested recovery steps"
+}
+```
+
+The UI should always surface `error_code`, `message`, and `recovery_strategy` together.
+
+## Tool Details and UI Mapping
+
+### 1) `ping`
+
+**Purpose:** Health check for MCP connectivity.
+
+**Args:** `{}`
+
+**UI:** “Test Connection” button.
+
+### 2) `hello_world`
+
+**Purpose:** Basic tool invocation test.
+
+**Args:** `{ "name": "World" }`
+
+**UI:** “Hello World” test input for debugging.
+
+### 3) `set_antidetection`
+
+**Purpose:** Configure scraping behavior for the session. This should be called **before** `get_content` or `get_structure`.
+
+**Args:**
+
+```json
+{
+  "profile": "balanced",
+  "custom_headers": {"Accept-Language": "en-US"},
+  "custom_user_agent": "...",
+  "respect_robots_txt": true,
+  "rate_limit_delay": 1.0,
+  "max_tokens": 100000
+}
+```
+
+**Profiles:** `stealth`, `balanced`, `none`, `custom`, `browser_tls`
+
+**UI Controls:**
+
+- Profile dropdown with short descriptions
+- Robots.txt toggle
+- Rate limit slider (0–60s)
+- Max tokens input (1000–1,000,000)
+- Custom headers + custom UA when profile=`custom`
+
+### 4) `get_structure`
+
+**Purpose:** Analyze page structure without full text extraction.
+
+**Args:**
+
+```json
+{
+  "url": "https://example.com",
+  "include_navigation": true,
+  "include_internal_links": true,
+  "include_external_links": true,
+  "include_forms": true,
+  "include_outline": true
+}
+```
+
+**UI:** Use to help users discover CSS selectors and site layout before scraping.
+
+**Key fields returned:** `sections`, `navigation`, `internal_links`, `external_links`, `forms`, `outline`.
+
+### 5) `get_content`
+
+**Purpose:** Fetch and extract content. Supports crawling via `depth`.
+
+**Args (single page):**
+
+```json
+{
+  "url": "https://example.com/article",
+  "depth": 1,
+  "selector": "#main",
+  "include_links": true,
+  "include_images": false,
+  "include_meta": true
+}
+```
+
+**Args (crawl):**
+
+```json
+{
+  "url": "https://docs.example.com",
+  "depth": 2,
+  "max_pages_per_level": 5
+}
+```
+
+**Args (session mode for large content):**
+
+```json
+{
+  "url": "https://example.com",
+  "depth": 1,
+  "session": true,
+  "chunk_size": 4000
+}
+```
+
+**UI Controls:**
+
+- URL input
+- Depth selector (1–3)
+- Max pages per level (1–20)
+- CSS selector input
+- Toggles: include_links, include_images, include_meta
+- “Session mode” toggle and chunk size input
+
+**Success (depth=1) includes:** `title`, `text`, `language`, `links`, `headings`, `images`, `meta`.
+**Success (depth>1) includes:** `pages` array and `summary` with total pages/length.
+
+### 6) `get_session_info`
+
+**Purpose:** Fetch metadata for large session results.
+
+**Args:**
+
+```json
+{ "session_id": "<guid>" }
+```
+
+**UI:** Show total size, total chunks, created time, and source URL.
+
+### 7) `get_session_chunk`
+
+**Purpose:** Retrieve a specific chunk from a session.
+
+**Args:**
+
+```json
+{ "session_id": "<guid>", "chunk_index": 0 }
+```
+
+**UI:** Paginated “chunk viewer” with next/previous buttons and chunk index selector.
+
+## Recommended UI Layout for Testing
+
+### A) Connection & Auth Panel
+
+- MCP endpoint URL input
+- “Test Connection” (ping)
+- Auth toggle (if required for your deployment)
+
+### B) Anti-Detection Panel
+
+- Profile selector
+- Robots.txt toggle
+- Rate limit slider
+- Max tokens input
+- Optional custom headers/UA editor
+- “Apply Settings” (set_antidetection)
+
+### C) Structure Panel
+
+- URL input
+- Toggle fields (navigation, links, forms, outline)
+- “Analyze Structure” button
+- Render sections + outline in a tree view
+
+### D) Content Panel
+
+- URL input
+- Depth selector + max pages per level
+- Selector input
+- include_links/images/meta toggles
+- Session mode toggle + chunk size
+- “Fetch Content” button
+- Render text, links, headings, images, and summary
+
+### E) Session Panel (Large Results)
+
+- Session ID input
+- “Get Info” button
+- Chunk index selector
+- “Get Chunk” button
+- Chunk preview with copy/download
+
+## Suggested LLM Workflow Logic
+
+1) Call `set_antidetection` once per session.
+2) Call `get_structure` to discover selectors.
+3) Call `get_content` with desired selector and depth.
+4) If content is large, re-run `get_content` with `session=true` and use `get_session_info` / `get_session_chunk` to browse.
+
+## Notes for Automation (n8n)
+
+- Keep `depth` low for reliability and speed.
+- Prefer `session=true` for large crawls to avoid payload limits.
+- Surface errors with `recovery_strategy` to guide users.
+- Respect robots.txt unless explicitly disabled.
 # GOFR-DIG MCP Tools Reference
 
 Complete documentation for all MCP tools provided by gofr-dig.

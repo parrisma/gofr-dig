@@ -8,12 +8,15 @@ and create MCP sessions inline for each test.
 """
 
 import json
+import os
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 
-MCP_URL = "http://localhost:8030/mcp"
+HOST = os.environ.get("GOFR_DIG_HOST", "localhost")
+MCP_PORT = os.environ.get("GOFR_DIG_MCP_PORT", "8070")
+MCP_URL = f"http://{HOST}:{MCP_PORT}/mcp"
 
 
 def parse_json(result) -> dict:

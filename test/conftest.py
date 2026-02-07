@@ -13,7 +13,8 @@ import pytest
 # Add project root to sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from app.auth import AuthService
+from gofr_common.auth import AuthService, GroupRegistry
+from gofr_common.auth.backends import MemoryTokenStore, MemoryGroupStore
 from app.config import Config
 
 
@@ -25,17 +26,26 @@ from app.config import Config
 # Must match the secret used when launching test MCP/web servers
 TEST_JWT_SECRET = "test-secret-key-for-secure-testing-do-not-use-in-production"
 
-# Get token store path from environment or use default based on project root
-if "GOFR_DIG_TOKEN_STORE" not in os.environ:
-    # Calculate from gofr-dig.env pattern
-    project_root = Path(__file__).parent.parent
-    logs_dir = project_root / "logs"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    TEST_TOKEN_STORE_PATH = str(logs_dir / "gofr_dig_tokens.json")
-else:
-    TEST_TOKEN_STORE_PATH = os.environ["GOFR_DIG_TOKEN_STORE"]
-
 TEST_GROUP = "test_group"
+
+
+def _create_test_auth_service() -> AuthService:
+    """Create an AuthService with in-memory stores for testing.
+
+    Automatically bootstraps reserved groups (public, admin) and creates
+    the test_group used across the test suite.
+    """
+    token_store = MemoryTokenStore()
+    group_store = MemoryGroupStore()
+    group_registry = GroupRegistry(store=group_store)  # auto-bootstraps public, admin
+    group_registry.create_group(TEST_GROUP, "Test group for test suite")
+
+    return AuthService(
+        token_store=token_store,
+        group_registry=group_registry,
+        secret_key=TEST_JWT_SECRET,
+        env_prefix="GOFR_DIG",
+    )
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -93,25 +103,15 @@ def temp_auth_dir(tmp_path):
 @pytest.fixture(scope="session")
 def test_auth_service():
     """
-    Create an AuthService instance for testing with a shared token store.
+    Create an AuthService instance for testing with in-memory stores.
 
-    This AuthService uses:
-    - The same JWT secret as test MCP/web servers: TEST_JWT_SECRET
-    - A shared token store at: TEST_TOKEN_STORE_PATH
-
-    Test servers must be launched with:
-      --jwt-secret "test-secret-key-for-secure-testing-do-not-use-in-production"
-      --token-store "/tmp/gofr_dig_test_tokens.json"
-
-    Or via environment variables:
-      GOFR_DIG_JWT_SECRET=test-secret-key-for-secure-testing-do-not-use-in-production
-      GOFR_DIG_TOKEN_STORE=/tmp/gofr_dig_test_tokens.json
+    Uses MemoryTokenStore and MemoryGroupStore for isolation.
+    Automatically creates reserved groups (public, admin) and TEST_GROUP.
 
     Returns:
-        AuthService: Configured auth service with shared secret and token store
+        AuthService: Configured auth service with in-memory stores
     """
-    auth_service = AuthService(secret_key=TEST_JWT_SECRET, token_store_path=TEST_TOKEN_STORE_PATH)
-    return auth_service
+    return _create_test_auth_service()
 
 
 @pytest.fixture(scope="function")
@@ -131,7 +131,7 @@ def test_jwt_token(test_auth_service):
         str: A valid JWT token for testing with 1 hour expiry
     """
     # Create token with 1 hour expiry
-    token = test_auth_service.create_token(group=TEST_GROUP, expires_in_seconds=3600)
+    token = test_auth_service.create_token(groups=[TEST_GROUP], expires_in_seconds=3600)
 
     yield token
 
@@ -148,41 +148,17 @@ def test_jwt_token(test_auth_service):
 
 
 @pytest.fixture(scope="function")
-def temp_token_store(tmp_path):
-    """
-    Create an isolated temporary token store for tests requiring token isolation.
-
-    Use this when:
-    - Testing cross-group access control
-    - Tests need separate token stores (no token persistence)
-    - Parallel test isolation requirements
-
-    Returns:
-        str: Path to temporary token store file (auto-cleaned up)
-    """
-    token_store = tmp_path / "isolated_tokens.json"
-    return str(token_store)
-
-
-@pytest.fixture(scope="function")
 def auth_service():
     """
-    Create an AuthService using the shared token store for MCP/web server tests.
+    Create an isolated AuthService with in-memory stores for each test.
 
     This is the standard fixture name used across most test files.
-    Uses the same token store as running MCP/web servers for integration tests.
-
-    Use this for:
-    - MCP server tests (requires shared token store)
-    - Web server tests (requires shared token store)
-    - Integration tests with running servers
-
-    For isolated token testing, use test_auth_service or create a custom fixture.
+    Each test gets a fresh AuthService with no shared state.
 
     Returns:
-        AuthService: Configured with TEST_JWT_SECRET and shared token store
+        AuthService: Configured with TEST_JWT_SECRET and in-memory stores
     """
-    return AuthService(secret_key=TEST_JWT_SECRET, token_store_path=TEST_TOKEN_STORE_PATH)
+    return _create_test_auth_service()
 
 
 @pytest.fixture(scope="function")
@@ -201,7 +177,7 @@ def mcp_headers(auth_service):
     Returns:
         Dict[str, str]: {"Authorization": "Bearer <token>"}
     """
-    token = auth_service.create_token(group="test_group", expires_in_seconds=3600)
+    token = auth_service.create_token(groups=["test_group"], expires_in_seconds=3600)
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -210,21 +186,17 @@ def configure_test_auth_environment():
     """
     Configure environment variables for test server authentication.
 
-    This ensures test MCP/web servers use the same JWT secret and token store
-    as the test fixtures. Auto-runs before all tests.
+    This ensures test MCP/web servers use the same JWT secret and in-memory
+    backend as the test fixtures. Auto-runs before all tests.
     """
     os.environ["GOFR_DIG_JWT_SECRET"] = TEST_JWT_SECRET
-    os.environ["GOFR_DIG_TOKEN_STORE"] = TEST_TOKEN_STORE_PATH
-
-    # Ensure token store directory exists
-    token_store_dir = Path(TEST_TOKEN_STORE_PATH).parent
-    token_store_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["GOFR_DIG_AUTH_BACKEND"] = "memory"
 
     yield
 
-    # Cleanup: optional - clear environment after tests
+    # Cleanup
     os.environ.pop("GOFR_DIG_JWT_SECRET", None)
-    os.environ.pop("GOFR_DIG_TOKEN_STORE", None)
+    os.environ.pop("GOFR_DIG_AUTH_BACKEND", None)
 
 
 # ============================================================================
@@ -277,7 +249,6 @@ def test_server_manager():
 
     manager = ServerManager(
         jwt_secret=TEST_JWT_SECRET,
-        token_store_path=TEST_TOKEN_STORE_PATH,
         mcp_port=8013,
         web_port=8000,
     )
