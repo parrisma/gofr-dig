@@ -45,13 +45,20 @@ if [ ! -f "$VENV_DIR/bin/python" ] || [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 
 # Install gofr-common as editable package
-if [ -d "$COMMON_DIR" ]; then
+if [ -f "$COMMON_DIR/pyproject.toml" ]; then
     echo "Installing gofr-common (editable)..."
     cd "$PROJECT_DIR"
     uv pip install -e "$COMMON_DIR"
 else
-    echo "Warning: gofr-common not found at $COMMON_DIR"
-    echo "Make sure the submodule is initialized: git submodule update --init"
+    echo ""
+    echo "ERROR: gofr-common is not initialised at $COMMON_DIR"
+    echo "  The directory exists but has no pyproject.toml."
+    echo "  This usually means the git submodule was not initialised."
+    echo ""
+    echo "  Fix (run from the project root on the host):"
+    echo "    git submodule update --init --recursive"
+    echo ""
+    exit 1
 fi
 
 # Install project dependencies
