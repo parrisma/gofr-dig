@@ -630,12 +630,26 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         # Fetch the URL
         fetch_result = await fetch_url(page_url)
         if not fetch_result.success:
-            return {
+            error_data: Dict[str, Any] = {
                 "success": False,
                 "error": f"Failed to fetch URL: {fetch_result.error}",
                 "url": page_url,
                 "status_code": fetch_result.status_code,
             }
+            # Add recovery hints for common HTTP errors
+            if fetch_result.status_code == 403:
+                error_data["recovery_strategy"] = (
+                    "The site is blocking the request (HTTP 403 Forbidden). "
+                    "Try calling set_antidetection with profile='stealth' or "
+                    "profile='browser_tls' before retrying. Example: "
+                    "set_antidetection(profile='browser_tls')"
+                )
+            elif fetch_result.status_code == 429:
+                error_data["recovery_strategy"] = (
+                    "Rate limited (HTTP 429). Increase the rate_limit_delay "
+                    "with set_antidetection(rate_limit_delay=3.0) and retry."
+                )
+            return error_data
 
         # Extract content
         from app.scraping.extractor import ContentExtractor

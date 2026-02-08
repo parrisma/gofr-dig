@@ -182,14 +182,16 @@ else
     # Set Vault backend env vars for containers
     export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-vault}"
 
-    # Set Vault credentials path for volume mount
-    VAULT_CREDS_FILE="$PROJECT_ROOT/secrets/service_creds/gofr-dig.json"
+    # AppRole credentials are baked into the prod image at /run/secrets/vault_creds
+    # (via Dockerfile.prod COPY from lib/gofr-common/secrets/service_creds/gofr-dig.json)
+    # Check they exist in source so the next --build will include them.
+    VAULT_CREDS_FILE="$PROJECT_ROOT/lib/gofr-common/secrets/service_creds/gofr-dig.json"
     if [ -f "$VAULT_CREDS_FILE" ]; then
-        export GOFR_DIG_VAULT_CREDS="$VAULT_CREDS_FILE"
-        ok "Vault AppRole credentials found"
+        ok "Vault AppRole credentials found (baked into image)"
     else
-        export GOFR_DIG_VAULT_CREDS="/dev/null"
-        warn "No AppRole credentials at $VAULT_CREDS_FILE (containers will use env-based Vault auth)"
+        warn "No AppRole credentials at $VAULT_CREDS_FILE"
+        warn "Run: GOFR_VAULT_URL=http://gofr-vault:8201 uv run scripts/setup_approle.py"
+        warn "Then rebuild image: $0 --build"
     fi
 fi
 
@@ -240,25 +242,14 @@ ALL_HEALTHY=false
 for i in $(seq 1 $RETRIES); do
     sleep 3
 
-    # Check if all services report healthy
-    UNHEALTHY=$(docker compose -f "$COMPOSE_FILE" ps --format json 2>/dev/null \
-        | grep -c '"unhealthy"\|"starting"' 2>/dev/null || echo "0")
-    RUNNING=$(docker compose -f "$COMPOSE_FILE" ps --status running -q 2>/dev/null | wc -l)
+    # Use Docker's own healthcheck status (works from dev container or host)
+    MCP_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-mcp 2>/dev/null || echo "missing")
+    MCPO_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-mcpo 2>/dev/null || echo "missing")
+    WEB_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-web 2>/dev/null || echo "missing")
 
-    if [ "$RUNNING" -ge 3 ] 2>/dev/null; then
-        # Quick curl checks
-        MCP_OK=false
-        MCPO_OK=false
-        WEB_OK=false
-
-        curl -sf "http://localhost:${GOFR_DIG_MCP_HOST_PORT}/mcp" -o /dev/null 2>/dev/null && MCP_OK=true
-        curl -sf "http://localhost:${GOFR_DIG_MCPO_HOST_PORT}/openapi.json" -o /dev/null 2>/dev/null && MCPO_OK=true
-        curl -sf "http://localhost:${GOFR_DIG_WEB_HOST_PORT}/health" -o /dev/null 2>/dev/null && WEB_OK=true
-
-        if [ "$MCP_OK" = true ] && [ "$WEB_OK" = true ]; then
-            ALL_HEALTHY=true
-            break
-        fi
+    if [ "$MCP_HEALTH" = "healthy" ] && [ "$WEB_HEALTH" = "healthy" ] && [ "$MCPO_HEALTH" = "healthy" ]; then
+        ALL_HEALTHY=true
+        break
     fi
 
     printf "."
@@ -267,11 +258,13 @@ echo ""
 
 # Report status per service
 for svc in mcp mcpo web; do
-    STATUS=$(docker compose -f "$COMPOSE_FILE" ps "$svc" --format "{{.Status}}" 2>/dev/null || echo "unknown")
-    case "$STATUS" in
-        *healthy*) ok "$svc: $STATUS" ;;
-        *running*) warn "$svc: $STATUS (not yet healthy)" ;;
-        *)         warn "$svc: $STATUS" ;;
+    CONTAINER="gofr-dig-${svc}"
+    HEALTH=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+    STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+    case "$HEALTH" in
+        healthy)  ok "$svc: $STATUS ($HEALTH)" ;;
+        starting) warn "$svc: $STATUS ($HEALTH — still starting)" ;;
+        *)        warn "$svc: $STATUS ($HEALTH)" ;;
     esac
 done
 

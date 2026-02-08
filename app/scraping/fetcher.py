@@ -279,6 +279,11 @@ class HTTPFetcher:
                     # Detect encoding from response or default to utf-8
                     encoding = response.encoding or "utf-8"
 
+                    # Set error for HTTP error status codes
+                    error_msg = None
+                    if response.status_code >= 400:
+                        error_msg = f"HTTP {response.status_code}"
+
                     logger.info(
                         "Fetch completed (curl_cffi)",
                         url=url,
@@ -294,6 +299,7 @@ class HTTPFetcher:
                         content_type=content_type,
                         headers=response_headers,
                         encoding=encoding,
+                        error=error_msg,
                         retry_count=attempt,
                         rate_limited=rate_limited,
                     )
@@ -467,6 +473,12 @@ class HTTPFetcher:
                         # Convert headers to dict
                         response_headers = dict(response.headers)
 
+                        # Set error for HTTP error status codes
+                        error_msg = None
+                        if response.status >= 400:
+                            reason = response.reason or "Unknown"
+                            error_msg = f"HTTP {response.status} {reason}"
+
                         logger.info(
                             "Fetch completed",
                             url=url,
@@ -482,6 +494,7 @@ class HTTPFetcher:
                             content_type=content_type,
                             headers=response_headers,
                             encoding=encoding,
+                            error=error_msg,
                             retry_count=attempt,
                             rate_limited=rate_limited,
                         )

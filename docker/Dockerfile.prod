@@ -45,6 +45,12 @@ RUN uv pip install mcpo
 # Fix ownership after installation
 RUN chown -R gofr-dig:gofr-dig /home/gofr-dig
 
+# Inject Vault AppRole credentials (baked into image at build time)
+# Future: will migrate to a shared Docker volume across all gofr services
+RUN mkdir -p /run/secrets && chown gofr-dig:gofr-dig /run/secrets
+COPY --chown=gofr-dig:gofr-dig lib/gofr-common/secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
+RUN chmod 600 /run/secrets/vault_creds
+
 # Expose ports (from gofr_ports.env: gofr-dig = 8070-8072)
 # 8070: MCP Server
 # 8071: MCPO Server

@@ -79,7 +79,6 @@ services:
     volumes:
       - gofr-dig-data:/home/gofr-dig/data
       - gofr-dig-prod-logs:/home/gofr-dig/logs
-      - ${GOFR_DIG_VAULT_CREDS:-/dev/null}:/run/secrets/vault_creds:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
       interval: 10s
@@ -159,7 +158,6 @@ services:
     volumes:
       - gofr-dig-data:/home/gofr-dig/data
       - gofr-dig-prod-logs:/home/gofr-dig/logs
-      - ${GOFR_DIG_VAULT_CREDS:-/dev/null}:/run/secrets/vault_creds:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
       interval: 15s

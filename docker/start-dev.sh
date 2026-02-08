@@ -171,23 +171,14 @@ ALL_HEALTHY=false
 for i in $(seq 1 $RETRIES); do
     sleep 3
 
-    UNHEALTHY=$(docker compose -f "$COMPOSE_FILE" ps --format json 2>/dev/null \
-        | grep -c '"unhealthy"\|"starting"' 2>/dev/null || echo "0")
-    RUNNING=$(docker compose -f "$COMPOSE_FILE" ps --status running -q 2>/dev/null | wc -l)
+    # Use Docker's own healthcheck status (works from dev container or host)
+    MCP_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-mcp-test 2>/dev/null || echo "missing")
+    MCPO_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-mcpo-test 2>/dev/null || echo "missing")
+    WEB_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' gofr-dig-web-test 2>/dev/null || echo "missing")
 
-    if [ "$RUNNING" -ge 3 ] 2>/dev/null; then
-        MCP_OK=false
-        MCPO_OK=false
-        WEB_OK=false
-
-        curl -sf "http://localhost:${GOFR_DIG_MCP_HOST_PORT}/mcp" -o /dev/null 2>/dev/null && MCP_OK=true
-        curl -sf "http://localhost:${GOFR_DIG_MCPO_HOST_PORT}/openapi.json" -o /dev/null 2>/dev/null && MCPO_OK=true
-        curl -sf "http://localhost:${GOFR_DIG_WEB_HOST_PORT}/health" -o /dev/null 2>/dev/null && WEB_OK=true
-
-        if [ "$MCP_OK" = true ] && [ "$WEB_OK" = true ]; then
-            ALL_HEALTHY=true
-            break
-        fi
+    if [ "$MCP_HEALTH" = "healthy" ] && [ "$WEB_HEALTH" = "healthy" ] && [ "$MCPO_HEALTH" = "healthy" ]; then
+        ALL_HEALTHY=true
+        break
     fi
 
     printf "."
@@ -196,8 +187,10 @@ echo ""
 
 # Report status per service
 for svc in mcp mcpo web; do
-    STATUS=$(docker compose -f "$COMPOSE_FILE" ps "$svc" --format "{{.Status}}" 2>/dev/null || echo "unknown")
-    case "$STATUS" in
+    CONTAINER="gofr-dig-${svc}-test"
+    HEALTH=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+    STATUS=$(docker inspect --format='{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
+    case "$HEALTH" in
         *healthy*) ok "$svc: $STATUS" ;;
         *running*) warn "$svc: $STATUS (not yet healthy)" ;;
         *)         warn "$svc: $STATUS" ;;
