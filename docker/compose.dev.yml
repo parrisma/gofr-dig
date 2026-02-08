@@ -2,7 +2,8 @@
 #
 # Port Configuration:
 #   All ports defined in lib/gofr-common/config/gofr_ports.env
-#   gofr-dig = 8070 (MCP) / 8071 (MCPO) / 8072 (Web)
+#   Test ports (prod + 100): 8170 (MCP) / 8171 (MCPO) / 8172 (Web)
+#   Containers run internally on prod ports (8070/8071/8072)
 #
 # Usage:
 #   cd docker
@@ -11,9 +12,9 @@
 #   docker compose -f compose.dev.yml down          # Stop and remove
 #
 # Services (Ephemeral — no persistent volumes):
-#   - mcp:   MCP Server (Streamable HTTP)  — port ${GOFR_DIG_MCP_PORT}  (8070)
-#   - mcpo:  MCPO Server (OpenAPI wrapper) — port ${GOFR_DIG_MCPO_PORT} (8071)
-#   - web:   Web Server (REST API)         — port ${GOFR_DIG_WEB_PORT}  (8072)
+#   - mcp:   MCP Server (Streamable HTTP)  — host port ${GOFR_DIG_MCP_PORT_TEST}  (8170)
+#   - mcpo:  MCPO Server (OpenAPI wrapper) — host port ${GOFR_DIG_MCPO_PORT_TEST} (8171)
+#   - web:   Web Server (REST API)         — host port ${GOFR_DIG_WEB_PORT_TEST}  (8172)
 
 name: gofr-dig-test
 
@@ -58,7 +59,7 @@ services:
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
-      - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT}}:${GOFR_DIG_MCP_PORT}"
+      - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT_TEST}}:${GOFR_DIG_MCP_PORT}"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
       interval: 10s
@@ -89,7 +90,7 @@ services:
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
       - GOFR_DIG_MCPO_PORT=${GOFR_DIG_MCPO_PORT}
     ports:
-      - "${GOFR_DIG_MCPO_HOST_PORT:-${GOFR_DIG_MCPO_PORT}}:${GOFR_DIG_MCPO_PORT}"
+      - "${GOFR_DIG_MCPO_HOST_PORT:-${GOFR_DIG_MCPO_PORT_TEST}}:${GOFR_DIG_MCPO_PORT}"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCPO_PORT}/openapi.json || exit 1"]
       interval: 15s
@@ -121,7 +122,7 @@ services:
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
-      - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT}}:${GOFR_DIG_WEB_PORT}"
+      - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT_TEST}}:${GOFR_DIG_WEB_PORT}"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
       interval: 15s

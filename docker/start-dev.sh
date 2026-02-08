@@ -109,11 +109,11 @@ if [ "$PORT_OFFSET" -gt 0 ]; then
     export GOFR_DIG_WEB_HOST_PORT=$((GOFR_DIG_WEB_PORT + PORT_OFFSET))
     ok "Ports loaded with offset +${PORT_OFFSET} (MCP=${GOFR_DIG_MCP_HOST_PORT}, MCPO=${GOFR_DIG_MCPO_HOST_PORT}, Web=${GOFR_DIG_WEB_HOST_PORT})"
 else
-    # No offset - host ports = container ports
-    export GOFR_DIG_MCP_HOST_PORT=$GOFR_DIG_MCP_PORT
-    export GOFR_DIG_MCPO_HOST_PORT=$GOFR_DIG_MCPO_PORT
-    export GOFR_DIG_WEB_HOST_PORT=$GOFR_DIG_WEB_PORT
-    ok "Ports loaded (MCP=${GOFR_DIG_MCP_PORT}, MCPO=${GOFR_DIG_MCPO_PORT}, Web=${GOFR_DIG_WEB_PORT})"
+    # No offset — dev/test stack always uses test ports (prod + 100)
+    export GOFR_DIG_MCP_HOST_PORT=${GOFR_DIG_MCP_PORT_TEST}
+    export GOFR_DIG_MCPO_HOST_PORT=${GOFR_DIG_MCPO_PORT_TEST}
+    export GOFR_DIG_WEB_HOST_PORT=${GOFR_DIG_WEB_PORT_TEST}
+    ok "Ports loaded — test ports (MCP=${GOFR_DIG_MCP_HOST_PORT}, MCPO=${GOFR_DIG_MCPO_HOST_PORT}, Web=${GOFR_DIG_WEB_HOST_PORT})"
 fi
 
 # ---- Handle --down ----------------------------------------------------------

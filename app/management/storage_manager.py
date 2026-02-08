@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from gofr_common.storage import FileStorage
 from app.config import Config
+from app.logger import session_logger as logger
 
 
 def resolve_storage_dir(cli_dir: Optional[str], data_root: Optional[str] = None) -> str:
@@ -74,6 +75,7 @@ def purge(args):
         return 0
 
     except Exception as e:
+        logger.error("Storage purge failed", error=str(e), cause=type(e).__name__)
         print(f"Error during purge: {str(e)}")
         return 1
 
@@ -118,6 +120,7 @@ def list_items(args):
         return 0
 
     except Exception as e:
+        logger.error("Failed to list storage items", error=str(e), cause=type(e).__name__)
         print(f"Error listing items: {str(e)}")
         return 1
 
@@ -156,6 +159,7 @@ def stats(args):
         return 0
 
     except Exception as e:
+        logger.error("Failed to get storage stats", error=str(e), cause=type(e).__name__)
         print(f"Error getting stats: {str(e)}")
         return 1
 

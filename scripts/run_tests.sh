@@ -2,25 +2,21 @@
 # =============================================================================
 # GOFR-Dig Test Runner
 # =============================================================================
-# Standardized test runner script with consistent configuration across all
-# GOFR projects. This script:
-# - Sets up virtual environment and PYTHONPATH
-# - Configures test ports for MCP and Web servers
-# - Supports coverage reporting
-# - Supports Docker execution
-# - Supports test categories (unit, integration, all)
-# - Manages server lifecycle for integration tests
+# Standardized test runner script for the gofr-dig project.
+#
+# Integration tests require running MCP/Web/MCPO services. This script uses
+# docker/start-dev.sh to launch ephemeral Docker services on test ports
+# (prod + 100: MCP=8170, MCPO=8171, Web=8172) via compose.dev.yml.
 #
 # Usage:
-#   ./scripts/run_tests.sh                          # Run all tests
+#   ./scripts/run_tests.sh                          # Run all tests (with servers)
 #   ./scripts/run_tests.sh test/mcp/                # Run specific test directory
 #   ./scripts/run_tests.sh -k "dig"                 # Run tests matching keyword
 #   ./scripts/run_tests.sh -v                       # Run with verbose output
 #   ./scripts/run_tests.sh --coverage               # Run with coverage report
 #   ./scripts/run_tests.sh --coverage-html          # Run with HTML coverage report
-#   ./scripts/run_tests.sh --docker                 # Run tests in Docker container
 #   ./scripts/run_tests.sh --unit                   # Run unit tests only (no servers)
-#   ./scripts/run_tests.sh --integration            # Run integration tests (with servers)
+#   ./scripts/run_tests.sh --integration            # Run integration tests only (with servers)
 #   ./scripts/run_tests.sh --no-servers             # Run without starting servers
 #   ./scripts/run_tests.sh --stop                   # Stop servers only
 #   ./scripts/run_tests.sh --cleanup-only           # Clean environment only
@@ -46,11 +42,10 @@ NC='\033[0m' # No Color
 
 # Project-specific configuration
 PROJECT_NAME="gofr-dig"
-ENV_PREFIX="GOFR_DIG"
-CONTAINER_NAME="gofr-dig-dev"
 TEST_DIR="test"
 COVERAGE_SOURCE="app"
 LOG_DIR="${PROJECT_ROOT}/logs"
+START_DEV_SCRIPT="${PROJECT_ROOT}/docker/start-dev.sh"
 
 # Activate virtual environment
 VENV_DIR="${PROJECT_ROOT}/.venv"
@@ -82,13 +77,18 @@ else
     export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 fi
 
-# Test configuration
+# Test configuration — use test ports (prod + 100) from centralized config
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_TOKEN_STORE="${LOG_DIR}/${PROJECT_NAME}_tokens_test.json"
 export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-memory}"
 export GOFR_DIG_HOST="${GOFR_DIG_HOST:-localhost}"
-export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:-8070}"
-export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:-8072}"
+export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST:-8170}"
+export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
+export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST:-8172}"
+# Also export _TEST vars so integration tests pick them up directly
+export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:-8170}"
+export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
+export GOFR_DIG_WEB_PORT_TEST="${GOFR_DIG_WEB_PORT_TEST:-8172}"
 
 # Ensure directories exist
 mkdir -p "${LOG_DIR}"
@@ -102,135 +102,42 @@ print_header() {
     echo -e "${GREEN}=== ${PROJECT_NAME} Test Runner ===${NC}"
     echo "Project root: ${PROJECT_ROOT}"
     echo "Environment: ${GOFR_DIG_ENV}"
-    echo "JWT Secret: ${GOFR_DIG_JWT_SECRET:0:20}..."
-    echo "Token store: ${GOFR_DIG_TOKEN_STORE}"
-    echo "MCP Port: ${GOFR_DIG_MCP_PORT}"
-    echo "Web Port: ${GOFR_DIG_WEB_PORT}"
+    echo "MCP Port (test): ${GOFR_DIG_MCP_PORT}"
+    echo "MCPO Port (test): ${GOFR_DIG_MCPO_PORT}"
+    echo "Web Port (test): ${GOFR_DIG_WEB_PORT}"
     echo ""
 }
 
-port_in_use() {
-    local port=$1
-    if command -v lsof >/dev/null 2>&1; then
-        lsof -i ":${port}" >/dev/null 2>&1
-    elif command -v ss >/dev/null 2>&1; then
-        ss -tuln | grep -q ":${port} "
-    elif command -v netstat >/dev/null 2>&1; then
-        netstat -tuln | grep -q ":${port} "
-    else
-        timeout 1 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1
+start_services() {
+    echo -e "${GREEN}=== Starting Ephemeral Docker Services ===${NC}"
+    if [ ! -x "${START_DEV_SCRIPT}" ]; then
+        echo -e "${RED}start-dev.sh not found or not executable: ${START_DEV_SCRIPT}${NC}"
+        exit 1
     fi
+    "${START_DEV_SCRIPT}"
+    echo ""
 }
 
-free_port() {
-    local port=$1
-    if ! port_in_use "$port"; then
-        return 0
+stop_services() {
+    echo -e "${YELLOW}Stopping ephemeral Docker services...${NC}"
+    if [ -x "${START_DEV_SCRIPT}" ]; then
+        "${START_DEV_SCRIPT}" --down 2>/dev/null || true
     fi
-    if command -v lsof >/dev/null 2>&1; then
-        lsof -ti ":${port}" | xargs -r kill -9 2>/dev/null || true
-    elif command -v ss >/dev/null 2>&1; then
-        ss -lptn "sport = :${port}" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d'=' -f2 | xargs -r kill -9 2>/dev/null || true
-    fi
-    sleep 1
-}
-
-stop_servers() {
-    echo "Stopping server processes..."
-    pkill -9 -f "python.*main_mcp" 2>/dev/null || true
-    pkill -9 -f "python.*main_web" 2>/dev/null || true
-    sleep 2
-    
-    if ps aux | grep -E "python.*(main_mcp|main_web)" | grep -v grep >/dev/null 2>&1; then
-        echo -e "${RED}WARNING: Some server processes still running${NC}"
-        return 1
-    fi
-    echo "All server processes stopped"
-    return 0
+    echo -e "${GREEN}Services stopped${NC}"
 }
 
 cleanup_environment() {
     echo -e "${YELLOW}Cleaning up test environment...${NC}"
-    stop_servers || true
-    
+    stop_services
     # Empty token store
     echo "{}" > "${GOFR_DIG_TOKEN_STORE}" 2>/dev/null || true
-    echo "Token store emptied: ${GOFR_DIG_TOKEN_STORE}"
-    
     echo -e "${GREEN}Cleanup complete${NC}"
-}
-
-start_mcp_server() {
-    local log_file="${LOG_DIR}/${PROJECT_NAME}_mcp_test.log"
-    echo -e "${YELLOW}Starting MCP server on port ${GOFR_DIG_MCP_PORT}...${NC}"
-    
-    free_port "${GOFR_DIG_MCP_PORT}"
-    rm -f "${log_file}"
-
-    nohup uv run python app/main_mcp.py \
-        --port "${GOFR_DIG_MCP_PORT}" \
-        --no-auth \
-        > "${log_file}" 2>&1 &
-    MCP_PID=$!
-    echo "MCP PID: ${MCP_PID}"
-
-    echo -n "Waiting for MCP server"
-    for _ in {1..30}; do
-        if ! kill -0 ${MCP_PID} 2>/dev/null; then
-            echo -e " ${RED}✗${NC}"
-            tail -20 "${log_file}"
-            return 1
-        fi
-        if port_in_use "${GOFR_DIG_MCP_PORT}"; then
-            echo -e " ${GREEN}✓${NC}"
-            return 0
-        fi
-        echo -n "."
-        sleep 0.5
-    done
-    echo -e " ${RED}✗${NC}"
-    tail -20 "${log_file}"
-    return 1
-}
-
-start_web_server() {
-    local log_file="${LOG_DIR}/${PROJECT_NAME}_web_test.log"
-    echo -e "${YELLOW}Starting Web server on port ${GOFR_DIG_WEB_PORT}...${NC}"
-    
-    free_port "${GOFR_DIG_WEB_PORT}"
-    rm -f "${log_file}"
-
-    nohup uv run python app/main_web.py \
-        --port "${GOFR_DIG_WEB_PORT}" \
-        --no-auth \
-        > "${log_file}" 2>&1 &
-    WEB_PID=$!
-    echo "Web PID: ${WEB_PID}"
-
-    echo -n "Waiting for Web server"
-    for _ in {1..30}; do
-        if ! kill -0 ${WEB_PID} 2>/dev/null; then
-            echo -e " ${RED}✗${NC}"
-            tail -20 "${log_file}"
-            return 1
-        fi
-        if port_in_use "${GOFR_DIG_WEB_PORT}"; then
-            echo -e " ${GREEN}✓${NC}"
-            return 0
-        fi
-        echo -n "."
-        sleep 0.5
-    done
-    echo -e " ${RED}✗${NC}"
-    tail -20 "${log_file}"
-    return 1
 }
 
 # =============================================================================
 # ARGUMENT PARSING
 # =============================================================================
 
-USE_DOCKER=false
 START_SERVERS=true
 COVERAGE=false
 COVERAGE_HTML=false
@@ -239,15 +146,10 @@ RUN_INTEGRATION=false
 RUN_ALL=false
 STOP_ONLY=false
 CLEANUP_ONLY=false
-PORT_OFFSET=0
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --docker)
-            USE_DOCKER=true
-            shift
-            ;;
         --coverage|--cov)
             COVERAGE=true
             shift
@@ -266,14 +168,6 @@ while [[ $# -gt 0 ]]; do
             RUN_INTEGRATION=true
             START_SERVERS=true
             shift
-            ;;
-        --port-offset)
-            PORT_OFFSET="$2"
-            if ! [[ "$PORT_OFFSET" =~ ^[0-9]+$ ]]; then
-                echo "Error: --port-offset requires a numeric value"
-                exit 1
-            fi
-            shift 2
             ;;
         --all)
             RUN_ALL=true
@@ -300,16 +194,14 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS] [PYTEST_ARGS...]"
             echo ""
             echo "Options:"
-            echo "  --docker         Run tests inside Docker container"
             echo "  --coverage       Run with coverage report"
             echo "  --coverage-html  Run with HTML coverage report"
             echo "  --unit           Run unit tests only (no servers)"
-            echo "  --integration    Run integration tests (with servers)"
-            echo "  --port-offset N  Offset MCP/Web ports by N (avoid conflicts)"
+            echo "  --integration    Run integration tests only (with servers)"
             echo "  --all            Run all test categories"
-            echo "  --no-servers     Don't start test servers"
-            echo "  --with-servers   Start test servers (default)"
-            echo "  --stop           Stop servers and exit"
+            echo "  --no-servers     Don't start Docker services"
+            echo "  --with-servers   Start Docker services (default)"
+            echo "  --stop           Stop Docker services and exit"
             echo "  --cleanup-only   Clean environment and exit"
             echo "  --help, -h       Show this help message"
             exit 0
@@ -327,17 +219,10 @@ done
 
 print_header
 
-# Apply port offset if requested
-if [ "$PORT_OFFSET" -gt 0 ]; then
-    export GOFR_DIG_MCP_PORT=$((GOFR_DIG_MCP_PORT + PORT_OFFSET))
-    export GOFR_DIG_WEB_PORT=$((GOFR_DIG_WEB_PORT + PORT_OFFSET))
-    echo -e "${BLUE}Ports offset by +${PORT_OFFSET} (MCP=${GOFR_DIG_MCP_PORT}, Web=${GOFR_DIG_WEB_PORT})${NC}"
-fi
-
 # Handle stop-only mode
 if [ "$STOP_ONLY" = true ]; then
-    echo -e "${YELLOW}Stopping servers and exiting...${NC}"
-    stop_servers
+    echo -e "${YELLOW}Stopping services and exiting...${NC}"
+    stop_services
     exit 0
 fi
 
@@ -347,22 +232,14 @@ if [ "$CLEANUP_ONLY" = true ]; then
     exit 0
 fi
 
-# Clean up before starting
-cleanup_environment
-
 # Initialize token store
 if [ ! -f "${GOFR_DIG_TOKEN_STORE}" ]; then
     echo "{}" > "${GOFR_DIG_TOKEN_STORE}"
 fi
 
-# Start servers if needed
-MCP_PID=""
-WEB_PID=""
-if [ "$START_SERVERS" = true ] && [ "$USE_DOCKER" = false ]; then
-    echo -e "${GREEN}=== Starting Test Servers ===${NC}"
-    start_mcp_server || { stop_servers; exit 1; }
-    start_web_server || { stop_servers; exit 1; }
-    echo ""
+# Start Docker services if needed
+if [ "$START_SERVERS" = true ]; then
+    start_services
 fi
 
 # Build coverage arguments
@@ -383,26 +260,14 @@ echo -e "${GREEN}=== Running Tests ===${NC}"
 set +e
 TEST_EXIT_CODE=0
 
-if [ "$USE_DOCKER" = true ]; then
-    # Docker execution
-    if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        echo -e "${RED}Container ${CONTAINER_NAME} is not running.${NC}"
-        echo "Run: ./docker/start-dev.sh to create it"
-        exit 1
-    fi
-    
-    DOCKER_CMD="cd /home/gofr/devroot/${PROJECT_NAME} && source .venv/bin/activate && pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS}"
-    docker exec "${CONTAINER_NAME}" bash -c "${DOCKER_CMD}"
-    TEST_EXIT_CODE=$?
-
-elif [ "$RUN_UNIT" = true ]; then
+if [ "$RUN_UNIT" = true ]; then
     echo -e "${BLUE}Running unit tests only (no servers)...${NC}"
     uv run python -m pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS} -k "not integration"
     TEST_EXIT_CODE=$?
 
 elif [ "$RUN_INTEGRATION" = true ]; then
     echo -e "${BLUE}Running integration tests (with servers)...${NC}"
-    uv run python -m pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS}
+    uv run python -m pytest ${TEST_DIR}/integration/ -v ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 
 elif [ "$RUN_ALL" = true ]; then
@@ -425,10 +290,9 @@ set -e
 # CLEANUP
 # =============================================================================
 
-if [ "$START_SERVERS" = true ] && [ "$USE_DOCKER" = false ]; then
+if [ "$START_SERVERS" = true ]; then
     echo ""
-    echo -e "${YELLOW}Stopping test servers...${NC}"
-    stop_servers || true
+    stop_services
 fi
 
 # Clean up token store
@@ -447,9 +311,8 @@ if [ $TEST_EXIT_CODE -eq 0 ]; then
     fi
 else
     echo -e "${RED}=== Tests Failed (exit code: ${TEST_EXIT_CODE}) ===${NC}"
-    echo "Server logs:"
-    echo "  MCP: ${LOG_DIR}/${PROJECT_NAME}_mcp_test.log"
-    echo "  Web: ${LOG_DIR}/${PROJECT_NAME}_web_test.log"
+    echo "Docker service logs:"
+    echo "  docker compose -f docker/compose.dev.yml logs"
 fi
 
 exit $TEST_EXIT_CODE

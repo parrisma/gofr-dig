@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GOFR-DIG MCP Server - Hello World Implementation."""
+"""GOFR-DIG MCP Server."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Dict, List
 
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent, Tool, ToolAnnotations
 
 from gofr_common.mcp import json_text as _common_json_text, MCPResponseBuilder
 
@@ -17,6 +17,7 @@ from app.logger import session_logger as logger
 from app.scraping import (
     AntiDetectionManager,
     AntiDetectionProfile,
+    FetchResult,
     fetch_url,
 )
 from app.scraping.state import get_scraping_state
@@ -33,7 +34,21 @@ web_url_override: str | None = None
 proxy_url_mode: bool = False
 session_manager: SessionManager | None = None
 
-app = Server("gofr-dig-service")
+app = Server(
+    "gofr-dig-service",
+    instructions="""You are connected to gofr-dig, a web scraping and page-analysis service.
+
+RECOMMENDED WORKFLOW:
+1. (Optional) set_antidetection — configure a scraping profile before fetching. Use 'balanced' for most sites, 'browser_tls' for sites like Wikipedia. Skip this step for simple fetches (sensible defaults apply).
+2. get_structure — analyze a page's layout to discover CSS selectors, navigation, forms, and heading outline. Use this to decide WHAT to extract.
+3. get_content — fetch and extract text. For a single page use depth=1 (default). For documentation sites use depth=2 or 3 (these automatically store results in a session because the payload is large).
+4. If a session_id is returned (depth > 1, or session=true), retrieve content with get_session_chunk(session_id, chunk_index) iterating chunk_index from 0 to total_chunks-1. Use get_session_info to check session metadata.
+5. list_sessions — browse all stored sessions from previous scrapes.
+6. get_session_urls — get plain HTTP URLs for every chunk (useful for automation fan-out to N8N, Make, Zapier).
+
+ALL ERRORS follow a standard shape: {success: false, error_code, message, details, recovery_strategy}. The recovery_strategy field tells you how to fix the problem.
+""",
+)
 
 # Initialize response builder with scraping-specific recovery strategies
 _response_builder = MCPResponseBuilder()
@@ -52,6 +67,45 @@ def get_session_manager() -> SessionManager:
 def _json_text(data: Any) -> TextContent:
     """Create JSON text content - uses gofr_common."""
     return _common_json_text(data)
+
+
+def _classify_fetch_error(result: FetchResult) -> str:
+    """Map a failed FetchResult to a specific error code.
+
+    Classifies HTTP status codes and error strings into granular error codes
+    so callers receive actionable recovery strategies instead of generic
+    FETCH_ERROR for every failure.
+    """
+    if result.status_code == 404:
+        return "URL_NOT_FOUND"
+    if result.status_code == 403:
+        return "ACCESS_DENIED"
+    if result.status_code == 429 or result.rate_limited:
+        return "RATE_LIMITED"
+    if result.status_code >= 500:
+        return "FETCH_ERROR"
+    error_str = (result.error or "").lower()
+    if "timeout" in error_str or "timed out" in error_str:
+        return "TIMEOUT_ERROR"
+    if "connect" in error_str or "resolve" in error_str or "dns" in error_str:
+        return "CONNECTION_ERROR"
+    return "FETCH_ERROR"
+
+
+def _classify_extraction_error(error_msg: str) -> str:
+    """Map a content extraction error to a specific error code.
+
+    Classifies extractor error strings into granular codes so callers
+    receive targeted recovery strategies.
+    """
+    msg = error_msg.lower()
+    if "did not match" in msg and "selector" in msg:
+        return "SELECTOR_NOT_FOUND"
+    if "invalid selector" in msg:
+        return "INVALID_SELECTOR"
+    if "encoding" in msg or "decode" in msg:
+        return "ENCODING_ERROR"
+    return "EXTRACTION_ERROR"
 
 
 def _error_response(
@@ -250,65 +304,68 @@ async def handle_list_tools() -> List[Tool]:
     return [
         Tool(
             name="ping",
-            description="Health check - returns server status. Use to verify the MCP server is running. Returns: {status: 'ok', service: 'gofr-dig'}",
+            description=(
+                "Health check. Returns {status: 'ok', service: 'gofr-dig'} when the server is reachable. "
+                "Call this first to verify connectivity before making scraping requests."
+            ),
             inputSchema={"type": "object", "properties": {}},
-        ),
-        Tool(
-            name="hello_world",
-            description="Returns a greeting message. A simple test tool. Returns: {message: 'Hello, <name>!'}",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name to greet. Defaults to 'World' if not provided.",
-                    }
-                },
-            },
+            annotations=ToolAnnotations(
+                title="Ping",
+                readOnlyHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="set_antidetection",
-            description="""Configure anti-detection settings for web scraping. Call this BEFORE get_content or get_structure to customize scraping behavior. Settings persist for the session.
-
-PROFILES:
-- stealth: Maximum protection with browser-like headers. Use for sites with strict bot detection.
-- balanced: Good protection for most sites (default). Recommended starting point.
-- none: Minimal headers, fastest but easily detected. Use for APIs or permissive sites.
-- custom: Define your own headers and user agent.
-- browser_tls: Uses curl_cffi to impersonate Chrome's TLS fingerprint. Use for sites like Wikipedia that use TLS fingerprinting to detect Python HTTP libraries.
-
-TOKEN LIMIT: max_tokens controls how much content is returned (default: 100000). Content exceeding this will be truncated, with deepest pages removed first.
-
-Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_delay: number, max_tokens: number}""",
+            description=(
+                "Configure anti-detection settings BEFORE calling get_content or get_structure. "
+                "Settings persist for the remainder of this MCP session.\n\n"
+                "PROFILES (choose one):\n"
+                "- 'balanced' \u2014 standard browser headers, fixed User-Agent. Good default for most sites.\n"
+                "- 'stealth'  \u2014 full browser headers with rotating User-Agent. Use when a site blocks you.\n"
+                "- 'browser_tls' \u2014 impersonates Chrome TLS fingerprint via curl_cffi. Required for sites that use TLS fingerprinting (e.g. Wikipedia).\n"
+                "- 'none'     \u2014 minimal headers. Use only for APIs or sites you control.\n"
+                "- 'custom'   \u2014 supply your own custom_headers and custom_user_agent.\n\n"
+                "OTHER SETTINGS:\n"
+                "- respect_robots_txt (default true) \u2014 honour robots.txt rules.\n"
+                "- rate_limit_delay (default 1.0s, range 0\u201360) \u2014 pause between requests.\n"
+                "- max_tokens (default 100000, range 1000\u20131000000) \u2014 cap response size; \u22484 chars/token. "
+                "Content exceeding this is truncated (deepest pages removed first).\n\n"
+                "Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_tokens}.\n"
+                "Errors: INVALID_PROFILE, INVALID_RATE_LIMIT, INVALID_MAX_TOKENS."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "profile": {
                         "type": "string",
                         "enum": ["stealth", "balanced", "none", "custom", "browser_tls"],
-                        "description": "Anti-detection profile. Use 'balanced' for most sites, 'stealth' for sites with bot detection, 'browser_tls' for sites using TLS fingerprinting (e.g., Wikipedia).",
+                        "description": (
+                            "Anti-detection profile to activate. "
+                            "Start with 'balanced'; escalate to 'stealth' or 'browser_tls' if you get FETCH_ERROR or empty content."
+                        ),
                     },
                     "custom_headers": {
                         "type": "object",
-                        "description": "Custom headers when profile='custom'. Example: {\"Accept-Language\": \"en-US\"}",
+                        "description": "Custom HTTP headers (only used with profile='custom'). Example: {\"Accept-Language\": \"en-US\"}",
                         "additionalProperties": {"type": "string"},
                     },
                     "custom_user_agent": {
                         "type": "string",
-                        "description": "Custom User-Agent when profile='custom'. Example: 'Mozilla/5.0 (compatible; MyBot/1.0)'",
+                        "description": "Custom User-Agent string (only used with profile='custom').",
                     },
                     "respect_robots_txt": {
                         "type": "boolean",
-                        "description": "Follow robots.txt rules (default: true). Set false to access disallowed paths (use responsibly).",
+                        "description": "Honour robots.txt rules (default: true). Set false only when you have explicit permission.",
                     },
                     "rate_limit_delay": {
                         "type": "number",
-                        "description": "Seconds to wait between requests (default: 1.0). Increase for rate-limited sites.",
+                        "description": "Seconds between requests (default: 1.0, range 0\u201360). Increase if you see rate-limit errors.",
                         "minimum": 0,
                     },
                     "max_tokens": {
                         "type": "integer",
-                        "description": "Maximum tokens to return in responses (default: 100000). Content will be truncated if exceeded. 1 token ≈ 4 characters.",
+                        "description": "Max tokens in responses (default: 100000). 1 token \u2248 4 characters. Reduce for faster responses; increase to capture full large pages.",
                         "minimum": 1000,
                         "maximum": 1000000,
                         "default": 100000,
@@ -316,86 +373,120 @@ Returns: {success: true, profile: '...', respect_robots_txt: bool, rate_limit_de
                 },
                 "required": ["profile"],
             },
+            annotations=ToolAnnotations(
+                title="Set Anti-Detection",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="get_content",
-            description="""Fetch a web page and extract its text content. Supports recursive crawling with depth parameter.
-
-USE CASES:
-- depth=1: Extract content from a single page (default)
-- depth=2: Extract from page AND pages it links to (great for documentation sites)
-- depth=3: Three levels deep (use sparingly, can be slow)
-
-RETURNS for depth=1: {success, url, title, text, language, links?, headings?, images?, meta?}
-RETURNS for depth>1: Same fields at root (from first page) PLUS {pages: [...], summary: {total_pages, total_text_length, pages_by_depth}}
-
-TIPS:
-- Use selector='#content' to focus on main content area
-- Set include_links=false if you only need text
-- Respects robots.txt and rate limits from set_antidetection""",
+            description=(
+                "Fetch a web page and extract its readable text. "
+                "This is the primary scraping tool.\n\n"
+                "DEPTH BEHAVIOUR:\n"
+                "- depth=1 (default): scrape a single page. Returns inline JSON: "
+                "{success, url, title, text, language, links, headings, images, meta}.\n"
+                "- depth=2: scrape the page AND the pages it links to. "
+                "Automatically stores results in a server-side session (payload is too large for inline). "
+                "Returns: {success, session_id, url, total_chunks, total_size, crawl_depth, total_pages}.\n"
+                "- depth=3: three levels deep (slow, use sparingly). Same session response.\n\n"
+                "SESSION MODE:\n"
+                "When the response contains a session_id (depth>1, or session=true with depth=1), "
+                "use get_session_chunk(session_id, chunk_index) to retrieve text, "
+                "iterating chunk_index from 0 to total_chunks-1.\n\n"
+                "TIPS:\n"
+                "- Call get_structure first to find a good CSS selector, then pass it as 'selector'.\n"
+                "- Use include_links=false and include_meta=false if you only need text.\n"
+                "- If you get ROBOTS_BLOCKED, call set_antidetection with respect_robots_txt=false.\n"
+                "- If you get FETCH_ERROR, try set_antidetection with profile='stealth' or 'browser_tls'.\n\n"
+                "Errors: INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR, "
+                "MAX_DEPTH_EXCEEDED, MAX_PAGES_EXCEEDED."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "Full URL to fetch (must include http:// or https://)",
+                        "description": "Full URL to fetch (must start with http:// or https://).",
                     },
                     "depth": {
                         "type": "integer",
-                        "description": "Crawl depth: 1=single page, 2=follow links once, 3=follow twice. Use 1 for single pages, 2-3 for documentation.",
+                        "description": (
+                            "Crawl depth. 1 = single page (inline response). "
+                            "2 = page + its links (auto-session). 3 = two levels of links (auto-session). "
+                            "Default 1."
+                        ),
                         "minimum": 1,
                         "maximum": 3,
                         "default": 1,
                     },
                     "max_pages_per_level": {
                         "type": "integer",
-                        "description": "Max pages per depth level (default: 5, max: 20). Lower values = faster crawls.",
+                        "description": "Max pages fetched per depth level (default 5, max 20). Keep low to avoid slow crawls.",
                         "minimum": 1,
                         "maximum": 20,
                         "default": 5,
                     },
                     "selector": {
                         "type": "string",
-                        "description": "CSS selector to extract specific elements. Examples: '#content', 'article', '.main-text'",
+                        "description": (
+                            "CSS selector to extract only matching elements. "
+                            "Examples: '#main-content', 'article', '.post-body'. "
+                            "Omit to extract the full page."
+                        ),
                     },
                     "include_links": {
                         "type": "boolean",
-                        "description": "Include extracted links (default: true). Set false for text-only extraction.",
+                        "description": "Include extracted hyperlinks in the result (default true). Set false for text-only.",
                     },
                     "include_images": {
                         "type": "boolean",
-                        "description": "Include image URLs and alt text (default: false). Enable for image-heavy pages.",
+                        "description": "Include image URLs and alt text (default false).",
                     },
                     "include_meta": {
                         "type": "boolean",
-                        "description": "Include page metadata like description, keywords, og:tags (default: true).",
+                        "description": "Include page metadata: description, keywords, Open Graph tags (default true).",
                     },
                     "session": {
                         "type": "boolean",
-                        "description": "If true, saves content to a session and returns a session_id instead of full content. Use for large pages.",
+                        "description": (
+                            "Force session storage and return a session_id instead of inline content. "
+                            "Automatically enabled when depth > 1. Useful for large single pages too."
+                        ),
                     },
                     "chunk_size": {
                         "type": "integer",
-                        "description": "Chunk size in characters for session storage (default: 4000). Only used if session=true.",
+                        "description": "Session chunk size in characters (default 4000). Only used when session storage is active.",
                     },
                 },
                 "required": ["url"],
             },
+            annotations=ToolAnnotations(
+                title="Get Content",
+                readOnlyHint=False,
+                destructiveHint=False,
+                idempotentHint=False,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="get_structure",
-            description="""Analyze the structure of a web page WITHOUT extracting all text content. Use this to understand page layout before deciding what to extract with get_content.
-
-RETURNS: {success, url, title, language, sections: [...], navigation?: [...], internal_links?: [...], external_links?: [...], forms?: [...], outline?: [...]}
-
-USE get_structure WHEN:
-- You need to find the right CSS selector for get_content
-- You want to understand page organization before crawling
-- You need to find forms, navigation, or specific sections
-
-USE get_content WHEN:
-- You need the actual text content
-- You want to extract and process page text""",
+            description=(
+                "Analyze a web page's structure WITHOUT extracting full text. "
+                "Use this BEFORE get_content to discover the page layout and find CSS selectors.\n\n"
+                "Returns: {success, url, title, language, sections, navigation, "
+                "internal_links, external_links, forms, outline}.\n\n"
+                "WHEN TO USE:\n"
+                "- You want to find the right CSS selector to pass to get_content(selector=...).\n"
+                "- You need to see the heading hierarchy or navigation structure.\n"
+                "- You want to discover forms or distinguish internal vs. external links.\n\n"
+                "WHEN TO USE get_content INSTEAD:\n"
+                "- You need the actual text content of a page.\n\n"
+                "Errors: INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -417,47 +508,122 @@ USE get_content WHEN:
                     },
                     "include_forms": {
                         "type": "boolean",
-                        "description": "Include form fields and actions (default: true)",
+                        "description": "Include HTML forms with their fields and actions (default true).",
                     },
                     "include_outline": {
                         "type": "boolean",
-                        "description": "Include heading hierarchy h1-h6 (default: true)",
+                        "description": "Include heading hierarchy (h1\u2013h6) as an outline (default true).",
                     },
                 },
                 "required": ["url"],
             },
+            annotations=ToolAnnotations(
+                title="Get Structure",
+                readOnlyHint=True,
+                openWorldHint=True,
+            ),
         ),
         Tool(
             name="get_session_info",
-            description="Get metadata for a scraping session. Returns total size, chunk count, and source URL.",
+            description=(
+                "Get metadata for a stored scraping session. "
+                "Returns: {success, session_id, url, total_chunks, total_size, created_at}.\n\n"
+                "Use this to find out how many chunks a session has before iterating with get_session_chunk. "
+                "The session_id comes from a previous get_content call (depth>1, or session=true)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "session_id": {
                         "type": "string",
-                        "description": "Session GUID returned by get_content(session=true)",
+                        "description": "Session GUID returned by get_content when session storage was used.",
                     },
                 },
                 "required": ["session_id"],
             },
+            annotations=ToolAnnotations(
+                title="Get Session Info",
+                readOnlyHint=True,
+                openWorldHint=False,
+            ),
         ),
         Tool(
             name="get_session_chunk",
-            description="Get a specific chunk of text content from a session.",
+            description=(
+                "Retrieve one chunk of text from a stored session. "
+                "Returns: {success, session_id, chunk_index, total_chunks, content}.\n\n"
+                "To read all content: iterate chunk_index from 0 to total_chunks-1. "
+                "Get total_chunks from get_session_info or from the get_content response that created the session."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "session_id": {
                         "type": "string",
-                        "description": "Session GUID",
+                        "description": "Session GUID from a previous get_content call.",
                     },
                     "chunk_index": {
                         "type": "integer",
-                        "description": "Zero-based index of the chunk to retrieve",
+                        "description": "Zero-based chunk index (0 to total_chunks-1).",
                     },
                 },
                 "required": ["session_id", "chunk_index"],
             },
+            annotations=ToolAnnotations(
+                title="Get Session Chunk",
+                readOnlyHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="list_sessions",
+            description=(
+                "List all stored scraping sessions. "
+                "Returns: {success, sessions: [{session_id, url, total_chunks, total_size, created_at}], total}.\n\n"
+                "Use this to discover sessions from earlier scrapes. "
+                "Then call get_session_info or get_session_chunk with any session_id."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+            },
+            annotations=ToolAnnotations(
+                title="List Sessions",
+                readOnlyHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="get_session_urls",
+            description=(
+                "Get a list of plain HTTP URLs for every chunk in a session. "
+                "Returns: {success, session_id, url, total_chunks, chunk_urls: [url, ...]}.\n\n"
+                "Each URL is a ready-to-GET REST endpoint that returns one chunk's text. "
+                "Designed for automation services (N8N, Make, Zapier) that can fan-out HTTP requests.\n\n"
+                "Typical flow: get_content(depth=2) \u2192 get_session_urls(session_id) \u2192 HTTP GET each chunk_url."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session GUID from a previous get_content call.",
+                    },
+                    "base_url": {
+                        "type": "string",
+                        "description": (
+                            "Override the web-server base URL (e.g. 'http://myhost:8072'). "
+                            "Auto-detected from GOFR_DIG_WEB_URL env or defaults to localhost if omitted."
+                        ),
+                    },
+                },
+                "required": ["session_id"],
+            },
+            annotations=ToolAnnotations(
+                title="Get Session URLs",
+                readOnlyHint=True,
+                openWorldHint=False,
+            ),
         ),
     ]
 
@@ -469,10 +635,6 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
 
     if name == "ping":
         return [_json_text({"status": "ok", "service": "gofr-dig"})]
-
-    if name == "hello_world":
-        greeting_name = arguments.get("name", "World")
-        return [_json_text({"message": f"Hello, {greeting_name}!"})]
 
     if name == "set_antidetection":
         return await _handle_set_antidetection(arguments)
@@ -488,6 +650,12 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
 
     if name == "get_session_chunk":
         return await _handle_get_session_chunk(arguments)
+
+    if name == "list_sessions":
+        return await _handle_list_sessions(arguments)
+
+    if name == "get_session_urls":
+        return await _handle_get_session_urls(arguments)
 
     return _error_response("UNKNOWN_TOOL", f"Unknown tool: {name}", {"tool_name": name})
 
@@ -598,6 +766,10 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     use_session = arguments.get("session", False)
     chunk_size = arguments.get("chunk_size")
 
+    # Auto-force session mode for multi-page crawls (depth > 1 produces large payloads)
+    if depth > 1:
+        use_session = True
+
     # Get base domain for internal link filtering
     base_domain = urlparse(url).netloc
 
@@ -630,26 +802,17 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         # Fetch the URL
         fetch_result = await fetch_url(page_url)
         if not fetch_result.success:
-            error_data: Dict[str, Any] = {
+            error_code = _classify_fetch_error(fetch_result)
+            return {
                 "success": False,
+                "error_code": error_code,
                 "error": f"Failed to fetch URL: {fetch_result.error}",
                 "url": page_url,
                 "status_code": fetch_result.status_code,
+                "recovery_strategy": RECOVERY_STRATEGIES.get(
+                    error_code, "Check the URL and try again."
+                ),
             }
-            # Add recovery hints for common HTTP errors
-            if fetch_result.status_code == 403:
-                error_data["recovery_strategy"] = (
-                    "The site is blocking the request (HTTP 403 Forbidden). "
-                    "Try calling set_antidetection with profile='stealth' or "
-                    "profile='browser_tls' before retrying. Example: "
-                    "set_antidetection(profile='browser_tls')"
-                )
-            elif fetch_result.status_code == 429:
-                error_data["recovery_strategy"] = (
-                    "Rate limited (HTTP 429). Increase the rate_limit_delay "
-                    "with set_antidetection(rate_limit_delay=3.0) and retry."
-                )
-            return error_data
 
         # Extract content
         from app.scraping.extractor import ContentExtractor
@@ -672,10 +835,16 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
             )
 
         if not content.success:
+            error_code = _classify_extraction_error(content.error or "")
             return {
                 "success": False,
+                "error_code": error_code,
                 "error": content.error,
                 "url": page_url,
+                "recovery_strategy": RECOVERY_STRATEGIES.get(
+                    error_code,
+                    "Try a different selector or check the page structure.",
+                ),
             }
 
         # Build response
@@ -749,9 +918,11 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                         }
                     )
                 ]
+            except GofrDigError as e:
+                return _exception_response(e)
             except Exception as e:
-                logger.error("Failed to create session", error=str(e))
-                return _error_response("SESSION_ERROR", f"Failed to create session: {str(e)}")
+                logger.error("Failed to create session", error=str(e), url=url)
+                return _error_response("SESSION_ERROR", f"Failed to create session: {e}", {"url": url})
 
         # Apply token limit truncation
         state = get_scraping_state()
@@ -854,6 +1025,41 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
     # Apply token limit truncation to multi-page results
     state = get_scraping_state()
+
+    # Handle session storage if requested (same as depth=1)
+    if use_session:
+        manager = get_session_manager()
+        c_size = chunk_size if chunk_size is not None else 4000
+
+        try:
+            session_id = manager.create_session(
+                url=url, content=results, chunk_size=c_size
+            )
+            info = manager.get_session_info(session_id)
+
+            return [
+                _json_text(
+                    {
+                        "success": True,
+                        "session_id": session_id,
+                        "url": url,
+                        "total_chunks": info["total_chunks"],
+                        "total_size": info["total_size_bytes"],
+                        "chunk_size": info["chunk_size"],
+                        "created_at": info["created_at"],
+                        "crawl_depth": depth,
+                        "total_pages": results["summary"]["total_pages"],
+                    }
+                )
+            ]
+        except GofrDigError as e:
+            return _exception_response(e)
+        except Exception as e:
+            logger.error("Failed to create session", error=str(e), url=url)
+            return _error_response(
+                "SESSION_ERROR", f"Failed to create session: {e}", {"url": url}
+            )
+
     results, truncated = _apply_token_limit_multipage(results, state.max_tokens)
 
     logger.info(
@@ -901,8 +1107,9 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     # Fetch the URL
     fetch_result = await fetch_url(url)
     if not fetch_result.success:
+        error_code = _classify_fetch_error(fetch_result)
         return _error_response(
-            "FETCH_ERROR",
+            error_code,
             f"Failed to fetch URL: {fetch_result.error}",
             {"url": url, "status_code": fetch_result.status_code},
         )
@@ -968,8 +1175,11 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
         manager = get_session_manager()
         info = manager.get_session_info(session_id)
         return [_json_text(info)]
+    except GofrDigError as e:
+        return _exception_response(e)
     except Exception as e:
-        return _error_response("SESSION_ERROR", str(e))
+        logger.error("Unexpected error in get_session_info", error=str(e), session_id=session_id)
+        return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
 
 
 async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -986,8 +1196,88 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
         manager = get_session_manager()
         chunk_data = manager.get_chunk(session_id, chunk_index)
         return [_json_text(chunk_data)]
+    except GofrDigError as e:
+        return _exception_response(e)
     except Exception as e:
-        return _error_response("SESSION_ERROR", str(e))
+        logger.error("Unexpected error in get_session_chunk", error=str(e), session_id=session_id, chunk_index=chunk_index)
+        return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
+
+
+async def _handle_list_sessions(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Handle list_sessions tool call."""
+    try:
+        manager = get_session_manager()
+        sessions = manager.list_sessions()
+        return [_json_text({"sessions": sessions, "total": len(sessions)})]
+    except GofrDigError as e:
+        return _exception_response(e)
+    except Exception as e:
+        logger.error("Unexpected error in list_sessions", error=str(e))
+        return _error_response("SESSION_ERROR", f"Unexpected error: {e}")
+
+
+def _resolve_web_base_url(override: str | None = None) -> str:
+    """Resolve the web server base URL for chunk URLs.
+
+    Priority: explicit override → GOFR_DIG_WEB_URL env var → localhost default.
+    """
+    import os
+
+    if override:
+        return override.rstrip("/")
+
+    env_url = os.environ.get("GOFR_DIG_WEB_URL")
+    if env_url:
+        return env_url.rstrip("/")
+
+    web_port = os.environ.get("GOFR_DIG_WEB_PORT", "8072")
+    return f"http://localhost:{web_port}"
+
+
+async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Handle get_session_urls tool call.
+
+    Returns a list of HTTP URLs for every chunk in a session so that
+    automation services (N8N, Make, etc.) can iterate and GET each chunk.
+    """
+    session_id = arguments.get("session_id")
+    if not session_id:
+        return _error_response("INVALID_ARGUMENT", "session_id is required")
+
+    base_url = _resolve_web_base_url(arguments.get("base_url"))
+
+    try:
+        manager = get_session_manager()
+        info = manager.get_session_info(session_id)
+        total_chunks = info["total_chunks"]
+
+        chunk_urls = [
+            f"{base_url}/sessions/{session_id}/chunks/{i}"
+            for i in range(total_chunks)
+        ]
+
+        return [
+            _json_text(
+                {
+                    "success": True,
+                    "session_id": session_id,
+                    "url": info.get("url", ""),
+                    "total_chunks": total_chunks,
+                    "chunk_urls": chunk_urls,
+                }
+            )
+        ]
+    except GofrDigError as e:
+        return _exception_response(e)
+    except Exception as e:
+        logger.error(
+            "Unexpected error in get_session_urls",
+            error=str(e),
+            session_id=session_id,
+        )
+        return _error_response(
+            "SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id}
+        )
 
 
 async def initialize_server() -> None:

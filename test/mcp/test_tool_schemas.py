@@ -27,19 +27,6 @@ def get_tools() -> list[Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         Tool(
-            name="hello_world",
-            description="Test greeting tool - returns a personalized message. Use for testing MCP connectivity. Input: {name: string (optional)}. Returns: {message: 'Hello, {name}!'}",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Name for the greeting (optional, defaults to 'World')",
-                    }
-                },
-            },
-        ),
-        Tool(
             name="set_antidetection",
             description="Configure anti-detection before scraping. PROFILES: 'stealth'=full browser headers, 'balanced'=standard protection (recommended), 'none'=minimal headers, 'custom'=user-defined, 'browser_tls'=Chrome TLS fingerprint (for Wikipedia). TOKEN LIMIT: max_tokens controls response size (default: 100000). Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_tokens}",
             inputSchema={
@@ -212,7 +199,7 @@ class TestToolSchemas:
 
     def test_tools_count(self, tools: list[Tool]) -> None:
         """Test expected number of tools."""
-        assert len(tools) == 5  # ping, hello_world, set_antidetection, get_content, get_structure
+        assert len(tools) == 4  # ping, set_antidetection, get_content, get_structure
 
 
 class TestToolDescriptionQuality:

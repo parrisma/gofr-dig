@@ -134,7 +134,12 @@ if __name__ == "__main__":
             # Wait for process to complete (or be interrupted)
             wrapper.process.wait()
         else:
-            logger.error("Failed to start MCPO wrapper")
+            logger.error(
+                "Failed to start MCPO wrapper",
+                reason="wrapper process not created",
+                host=args.mcpo_host,
+                port=args.mcpo_port,
+            )
             sys.exit(1)
 
     except KeyboardInterrupt:

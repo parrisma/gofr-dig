@@ -338,11 +338,13 @@ class ContentExtractor:
         try:
             soup = BeautifulSoup(html, self.parser)
         except Exception as e:
+            logger.error("Failed to parse HTML for selector extraction", error=str(e), selector=selector)
             return ExtractedContent(url=url, error=f"Parse error: {str(e)}")
 
         try:
             elements = soup.select(selector)
         except Exception as e:
+            logger.warning("Invalid CSS selector", selector=selector, error=str(e))
             return ExtractedContent(
                 url=url,
                 error=f"Invalid selector '{selector}': {str(e)}",
@@ -383,6 +385,7 @@ class ContentExtractor:
         try:
             soup = BeautifulSoup(html, self.parser)
         except Exception as e:
+            logger.error("Failed to parse HTML for main content extraction", error=str(e), url=url)
             return ExtractedContent(url=url, error=f"Parse error: {str(e)}")
 
         # Remove unwanted tags first

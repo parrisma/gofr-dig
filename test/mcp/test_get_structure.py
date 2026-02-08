@@ -346,7 +346,7 @@ class TestGetStructureMCPTool:
 
         data = get_mcp_result_data(result)
         assert data["success"] is False
-        assert data["error_code"] == "FETCH_ERROR"
+        assert data["error_code"] == "URL_NOT_FOUND"
         assert data["details"]["status_code"] == 404
 
     @pytest.mark.asyncio

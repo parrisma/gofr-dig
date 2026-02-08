@@ -11,11 +11,13 @@ import json
 import os
 import pytest
 from mcp import ClientSession
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client import streamable_http
+
+streamable_http_client = streamable_http.streamablehttp_client
 
 
 HOST = os.environ.get("GOFR_DIG_HOST", "localhost")
-MCP_PORT = os.environ.get("GOFR_DIG_MCP_PORT", "8070")
+MCP_PORT = os.environ.get("GOFR_DIG_MCP_PORT_TEST", "8170")
 MCP_URL = f"http://{HOST}:{MCP_PORT}/mcp"
 
 

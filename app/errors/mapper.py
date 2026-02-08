@@ -54,7 +54,16 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "MAX_PAGES_EXCEEDED": "Too many pages requested. Reduce max_pages_per_level (max 20).",
     
     # Tool errors
-    "UNKNOWN_TOOL": "Available tools: ping, hello_world, set_antidetection, get_content, get_structure.",
+    "UNKNOWN_TOOL": "Available tools: ping, set_antidetection, get_content, get_structure, get_session_info, get_session_chunk, list_sessions.",
+    
+    # Argument validation
+    "INVALID_ARGUMENT": "A required argument is missing or invalid. Check the tool schema for required parameters.",
+    "INVALID_MAX_TOKENS": "max_tokens must be between 1000 and 1000000. Default is 100000 (~400K characters).",
+    
+    # Session errors
+    "SESSION_ERROR": "Session operation failed. Use list_sessions to check available sessions.",
+    "SESSION_NOT_FOUND": "Session ID not found. Use list_sessions to discover sessions, or create one with get_content(session=true).",
+    "INVALID_CHUNK_INDEX": "Chunk index out of range. Use get_session_info to check the total number of chunks.",
     
     # Configuration errors
     "CONFIGURATION_ERROR": "Check server configuration. Contact administrator if issue persists.",

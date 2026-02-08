@@ -27,6 +27,7 @@ async def test_list_tools_includes_session_tools():
     tool_names = [t.name for t in tools]
     assert "get_session_info" in tool_names
     assert "get_session_chunk" in tool_names
+    assert "list_sessions" in tool_names
     
     # Check get_content has session param
     get_content = next(t for t in tools if t.name == "get_content")
@@ -98,3 +99,123 @@ async def test_get_session_chunk(mock_session_manager):
         mock_session_manager.get_chunk.assert_called_with("mock-session-id", 0)
         response = json.loads(result[0].text)  # type: ignore
         assert response == "Mock chunk content"
+
+
+@pytest.mark.asyncio
+async def test_list_sessions(mock_session_manager):
+    mock_session_manager.list_sessions.return_value = [
+        {
+            "session_id": "id-1",
+            "url": "http://a.com",
+            "created_at": "2025-01-01T00:00:00Z",
+            "total_size_bytes": 1000,
+            "total_chars": 1000,
+            "total_chunks": 1,
+            "chunk_size": 4000,
+            "group": "test-group",
+        },
+        {
+            "session_id": "id-2",
+            "url": "http://b.com",
+            "created_at": "2025-01-02T00:00:00Z",
+            "total_size_bytes": 5000,
+            "total_chars": 5000,
+            "total_chunks": 2,
+            "chunk_size": 4000,
+            "group": "test-group",
+        },
+    ]
+
+    with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
+        result = await handle_call_tool("list_sessions", {})
+
+        mock_session_manager.list_sessions.assert_called_once()
+        response = json.loads(result[0].text)  # type: ignore
+        assert response["total"] == 2
+        assert len(response["sessions"]) == 2
+        assert response["sessions"][0]["session_id"] == "id-1"
+
+
+@pytest.mark.asyncio
+async def test_list_sessions_empty(mock_session_manager):
+    mock_session_manager.list_sessions.return_value = []
+
+    with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
+        result = await handle_call_tool("list_sessions", {})
+
+        response = json.loads(result[0].text)  # type: ignore
+        assert response["total"] == 0
+        assert response["sessions"] == []
+
+
+# ==========================================================================
+# get_session_urls tool
+# ==========================================================================
+
+@pytest.mark.asyncio
+async def test_list_tools_includes_get_session_urls():
+    tools = await handle_list_tools()  # type: ignore
+    tool_names = [t.name for t in tools]
+    assert "get_session_urls" in tool_names
+
+    tool = next(t for t in tools if t.name == "get_session_urls")
+    assert "session_id" in tool.inputSchema["properties"]
+    assert "base_url" in tool.inputSchema["properties"]
+    assert tool.inputSchema["required"] == ["session_id"]
+
+
+@pytest.mark.asyncio
+async def test_get_session_urls(mock_session_manager):
+    with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
+        result = await handle_call_tool(
+            "get_session_urls",
+            {"session_id": "mock-session-id", "base_url": "http://web:8072"},
+        )
+
+        response = json.loads(result[0].text)  # type: ignore
+        assert response["success"] is True
+        assert response["session_id"] == "mock-session-id"
+        assert response["total_chunks"] == 5
+        assert len(response["chunk_urls"]) == 5
+        for i, url in enumerate(response["chunk_urls"]):
+            assert url == f"http://web:8072/sessions/mock-session-id/chunks/{i}"
+
+
+@pytest.mark.asyncio
+async def test_get_session_urls_default_base_url(mock_session_manager):
+    """Without base_url, falls back to GOFR_DIG_WEB_URL or localhost."""
+    with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
+        with patch.dict("os.environ", {"GOFR_DIG_WEB_URL": "https://proxy.example.com"}):
+            result = await handle_call_tool(
+                "get_session_urls",
+                {"session_id": "mock-session-id"},
+            )
+            response = json.loads(result[0].text)  # type: ignore
+            assert all(
+                url.startswith("https://proxy.example.com/sessions/")
+                for url in response["chunk_urls"]
+            )
+
+
+@pytest.mark.asyncio
+async def test_get_session_urls_missing_session_id():
+    result = await handle_call_tool("get_session_urls", {})
+    response = json.loads(result[0].text)  # type: ignore
+    assert response["success"] is False
+    assert "INVALID_ARGUMENT" in response.get("error_code", "")
+
+
+@pytest.mark.asyncio
+async def test_get_session_urls_session_not_found(mock_session_manager):
+    from app.exceptions import SessionNotFoundError
+
+    mock_session_manager.get_session_info.side_effect = SessionNotFoundError(
+        "SESSION_NOT_FOUND", "Session not found", {"session_id": "bad-id"}
+    )
+    with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
+        result = await handle_call_tool(
+            "get_session_urls",
+            {"session_id": "bad-id", "base_url": "http://web:8072"},
+        )
+        response = json.loads(result[0].text)  # type: ignore
+        assert response["success"] is False

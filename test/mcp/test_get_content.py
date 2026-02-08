@@ -393,6 +393,7 @@ class TestGetContentMCPTool:
 
         data = get_mcp_result_data(result)
         assert "error" in data
+        assert data.get("error_code") == "URL_NOT_FOUND"
         assert data.get("status_code") == 404
 
     @pytest.mark.asyncio
