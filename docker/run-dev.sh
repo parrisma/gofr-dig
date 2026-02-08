@@ -18,7 +18,9 @@ GOFR_GID=1000
 CONTAINER_NAME="gofr-dig-dev"
 IMAGE_NAME="gofr-dig-dev:latest"
 
+# Primary network for testing; also connects to gofr-net for Vault access
 DOCKER_NETWORK="${GOFRDIG_DOCKER_NETWORK:-gofr-test-net}"
+GOFR_NETWORK="gofr-net"
 
 # Parse command line arguments
 while [ $# -gt 0 ]; do
@@ -39,7 +41,7 @@ echo "======================================================================="
 echo "Starting GOFR-DIG Development Container"
 echo "======================================================================="
 echo "User: ${GOFR_USER} (UID=${GOFR_UID}, GID=${GOFR_GID})"
-echo "Network: $DOCKER_NETWORK"
+echo "Networks: $DOCKER_NETWORK, $GOFR_NETWORK"
 echo "Ports: none (dev container is for code editing; prod owns 8070-8072)"
 echo "======================================================================="
 
@@ -47,6 +49,12 @@ echo "======================================================================="
 if ! docker network inspect $DOCKER_NETWORK >/dev/null 2>&1; then
     echo "Creating network: $DOCKER_NETWORK"
     docker network create $DOCKER_NETWORK
+fi
+
+# Ensure gofr-net exists for Vault/service access
+if ! docker network inspect $GOFR_NETWORK >/dev/null 2>&1; then
+    echo "Creating network: $GOFR_NETWORK"
+    docker network create $GOFR_NETWORK
 fi
 
 # Create docker volume for persistent data
@@ -127,6 +135,12 @@ CONTAINER_ID=$(docker run -d \
 echo "Waiting for container to stabilise..."
 sleep 2
 
+# Connect to gofr-net for Vault and other GOFR services
+if ! docker network inspect $GOFR_NETWORK --format '{{range .Containers}}{{.Name}} {{end}}' | grep -q "$CONTAINER_NAME"; then
+    echo "Connecting to $GOFR_NETWORK..."
+    docker network connect $GOFR_NETWORK "$CONTAINER_NAME"
+fi
+
 CONTAINER_STATE=$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "not_found")
 CONTAINER_RUNNING=$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo "false")
 
@@ -157,7 +171,7 @@ echo "======================================================================="
 echo "  ID:      ${CONTAINER_ID:0:12}"
 echo "  State:   $CONTAINER_STATE"
 echo "  Image:   $IMAGE_NAME"
-echo "  Network: $DOCKER_NETWORK"
+echo "  Networks: $DOCKER_NETWORK, $GOFR_NETWORK"
 echo "  Docker:  $( [ -n "$DOCKER_GID_ARGS" ] && echo 'socket mounted (DinD ready)' || echo 'socket NOT mounted' )"
 echo ""
 echo "Useful commands:"
