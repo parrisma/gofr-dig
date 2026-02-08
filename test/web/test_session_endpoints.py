@@ -34,13 +34,13 @@ def test_get_session_info(client, mock_session_manager):
     data = response.json()
     assert data["session_id"] == "mock-session-id"
     assert data["total_chunks"] == 5
-    mock_session_manager.get_session_info.assert_called_with("mock-session-id")
+    mock_session_manager.get_session_info.assert_called_with("mock-session-id", group=None)
 
 def test_get_session_chunk(client, mock_session_manager):
     response = client.get("/sessions/mock-session-id/chunks/0")
     assert response.status_code == 200
     assert response.text == "Mock chunk content"
-    mock_session_manager.get_chunk.assert_called_with("mock-session-id", 0)
+    mock_session_manager.get_chunk.assert_called_with("mock-session-id", 0, group=None)
 
 def test_get_session_info_not_found(client, mock_session_manager):
     mock_session_manager.get_session_info.side_effect = SessionNotFoundError(

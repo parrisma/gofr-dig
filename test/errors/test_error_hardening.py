@@ -293,6 +293,7 @@ class TestRecoveryStrategiesCoverage:
         "UNKNOWN_TOOL", "INVALID_PROFILE", "INVALID_RATE_LIMIT",
         "INVALID_MAX_TOKENS", "INVALID_URL", "SESSION_ERROR",
         "INVALID_ARGUMENT", "ROBOTS_BLOCKED", "EXTRACTION_ERROR",
+        "AUTH_ERROR", "PERMISSION_DENIED",
     }
 
     # Codes emitted via _classify_fetch_error()

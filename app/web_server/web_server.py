@@ -19,6 +19,16 @@ from app.exceptions import GofrDigError, SessionNotFoundError, SessionValidation
 from app.errors.mapper import error_to_web_response
 from app.logger import session_logger as logger
 
+try:
+    from gofr_common.auth.exceptions import AuthError
+except ImportError:
+    AuthError = None  # type: ignore[assignment,misc]
+
+try:
+    from gofr_common.storage.exceptions import PermissionDeniedError
+except ImportError:
+    PermissionDeniedError = None  # type: ignore[assignment,misc]
+
 
 class GofrDigWebServer:
     """Minimal web server for GOFR-DIG - provides basic endpoints."""
@@ -40,6 +50,26 @@ class GofrDigWebServer:
         self.session_manager = SessionManager(storage_dir)
         
         self.app = self._create_app()
+
+    def _resolve_group(self, request: Request) -> str | None:
+        """Resolve primary group from Authorization header.
+
+        Returns group string or None for anonymous/no-auth.
+        Raises AuthError (from gofr_common) if token is invalid.
+        """
+        if self.auth_service is None:
+            return None
+
+        auth_header = request.headers.get("authorization", "")
+        if not auth_header:
+            return None
+
+        raw = auth_header.removeprefix("Bearer ").removeprefix("bearer ").strip()
+        if not raw:
+            return None
+
+        token_info = self.auth_service.verify_token(raw)
+        return token_info.groups[0] if token_info.groups else None
 
     def _create_app(self) -> Any:
         """Create the Starlette application."""
@@ -82,15 +112,23 @@ class GofrDigWebServer:
         """Get session metadata."""
         session_id = request.path_params["session_id"]
         try:
-            info = self.session_manager.get_session_info(session_id)
-            return JSONResponse(info)
-        except SessionNotFoundError as e:
-            logger.warning("Session not found", session_id=session_id)
-            return JSONResponse(error_to_web_response(e), status_code=404)
-        except GofrDigError as e:
-            logger.error("Session error", session_id=session_id, error=str(e))
-            return JSONResponse(error_to_web_response(e), status_code=400)
+            group = self._resolve_group(request)
         except Exception as e:
+            if AuthError is not None and isinstance(e, AuthError):
+                return JSONResponse({"error": {"code": "AUTH_ERROR", "message": str(e)}}, status_code=401)
+            raise
+        try:
+            info = self.session_manager.get_session_info(session_id, group=group)
+            return JSONResponse(info)
+        except Exception as e:
+            if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+                return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
+            if isinstance(e, SessionNotFoundError):
+                logger.warning("Session not found", session_id=session_id)
+                return JSONResponse(error_to_web_response(e), status_code=404)
+            if isinstance(e, GofrDigError):
+                logger.error("Session error", session_id=session_id, error=str(e))
+                return JSONResponse(error_to_web_response(e), status_code=400)
             logger.error(
                 "Unexpected error in get_session_info",
                 session_id=session_id,
@@ -107,28 +145,36 @@ class GofrDigWebServer:
         session_id = request.path_params["session_id"]
         chunk_index = request.path_params["chunk_index"]
         try:
-            content = self.session_manager.get_chunk(session_id, chunk_index)
+            group = self._resolve_group(request)
+        except Exception as e:
+            if AuthError is not None and isinstance(e, AuthError):
+                return JSONResponse({"error": {"code": "AUTH_ERROR", "message": str(e)}}, status_code=401)
+            raise
+        try:
+            content = self.session_manager.get_chunk(session_id, chunk_index, group=group)
             from starlette.responses import PlainTextResponse
             return PlainTextResponse(content)
-        except SessionNotFoundError as e:
-            logger.warning("Session not found", session_id=session_id)
-            return JSONResponse(error_to_web_response(e), status_code=404)
-        except SessionValidationError as e:
-            logger.warning(
-                "Invalid chunk index",
-                session_id=session_id,
-                chunk_index=chunk_index,
-            )
-            return JSONResponse(error_to_web_response(e), status_code=400)
-        except GofrDigError as e:
-            logger.error(
-                "Session error",
-                session_id=session_id,
-                chunk_index=chunk_index,
-                error=str(e),
-            )
-            return JSONResponse(error_to_web_response(e), status_code=400)
         except Exception as e:
+            if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+                return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
+            if isinstance(e, SessionNotFoundError):
+                logger.warning("Session not found", session_id=session_id)
+                return JSONResponse(error_to_web_response(e), status_code=404)
+            if isinstance(e, SessionValidationError):
+                logger.warning(
+                    "Invalid chunk index",
+                    session_id=session_id,
+                    chunk_index=chunk_index,
+                )
+                return JSONResponse(error_to_web_response(e), status_code=400)
+            if isinstance(e, GofrDigError):
+                logger.error(
+                    "Session error",
+                    session_id=session_id,
+                    chunk_index=chunk_index,
+                    error=str(e),
+                )
+                return JSONResponse(error_to_web_response(e), status_code=400)
             logger.error(
                 "Unexpected error in get_session_chunk",
                 session_id=session_id,
@@ -151,6 +197,13 @@ class GofrDigWebServer:
 
         session_id = request.path_params["session_id"]
 
+        try:
+            group = self._resolve_group(request)
+        except Exception as e:
+            if AuthError is not None and isinstance(e, AuthError):
+                return JSONResponse({"error": {"code": "AUTH_ERROR", "message": str(e)}}, status_code=401)
+            raise
+
         # Resolve base URL: query param → env var → request Host header
         base_url = request.query_params.get("base_url")
         if not base_url:
@@ -162,7 +215,7 @@ class GofrDigWebServer:
         base_url = base_url.rstrip("/")
 
         try:
-            info = self.session_manager.get_session_info(session_id)
+            info = self.session_manager.get_session_info(session_id, group=group)
             total_chunks = info["total_chunks"]
             chunk_urls = [
                 f"{base_url}/sessions/{session_id}/chunks/{i}"
@@ -175,13 +228,15 @@ class GofrDigWebServer:
                 "total_chunks": total_chunks,
                 "chunk_urls": chunk_urls,
             })
-        except SessionNotFoundError as e:
-            logger.warning("Session not found", session_id=session_id)
-            return JSONResponse(error_to_web_response(e), status_code=404)
-        except GofrDigError as e:
-            logger.error("Session error", session_id=session_id, error=str(e))
-            return JSONResponse(error_to_web_response(e), status_code=400)
         except Exception as e:
+            if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+                return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
+            if isinstance(e, SessionNotFoundError):
+                logger.warning("Session not found", session_id=session_id)
+                return JSONResponse(error_to_web_response(e), status_code=404)
+            if isinstance(e, GofrDigError):
+                logger.error("Session error", session_id=session_id, error=str(e))
+                return JSONResponse(error_to_web_response(e), status_code=400)
             logger.error(
                 "Unexpected error in get_session_urls",
                 session_id=session_id,

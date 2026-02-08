@@ -80,7 +80,8 @@ class TestHTMLFixtureServer:
 
     def test_base_url_property(self, html_fixture_server):
         """Test that base_url property returns correct URL."""
-        assert html_fixture_server.base_url == "http://127.0.0.1:8766"
+        ext_host = html_fixture_server._external_host
+        assert html_fixture_server.base_url == f"http://{ext_host}:8766"
 
     def test_get_url_strips_leading_slash(self, html_fixture_server):
         """Test that get_url handles leading slash correctly."""
@@ -88,7 +89,8 @@ class TestHTMLFixtureServer:
         url2 = html_fixture_server.get_url("/index.html")
         
         assert url1 == url2
-        assert url1 == "http://127.0.0.1:8766/index.html"
+        ext_host = html_fixture_server._external_host
+        assert url1 == f"http://{ext_host}:8766/index.html"
 
     def test_404_for_nonexistent_file(self, html_fixture_server):
         """Test that server returns 404 for non-existent files."""

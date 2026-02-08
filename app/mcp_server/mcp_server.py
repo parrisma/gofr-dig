@@ -26,8 +26,74 @@ from app.errors.mapper import error_to_mcp_response, RECOVERY_STRATEGIES
 from app.session.manager import SessionManager
 from app.config import Config
 
+try:
+    from gofr_common.auth.exceptions import AuthError
+except ImportError:
+    AuthError = None  # type: ignore[assignment,misc]
+
+try:
+    from gofr_common.storage.exceptions import PermissionDeniedError
+except ImportError:
+    PermissionDeniedError = None  # type: ignore[assignment,misc]
+
+# Shared auth_tokens schema fragment — added to every tool except ping.
+AUTH_TOKENS_SCHEMA = {
+    "auth_tokens": {
+        "type": "array",
+        "items": {"type": "string"},
+        "description": (
+            "One or more JWT tokens for authentication. "
+            "The server verifies each token and uses the first group "
+            "from the first valid token to scope session access. "
+            "Omit for anonymous/public access."
+        ),
+    },
+}
+
 # Module-level configuration (set by main_mcp.py)
 auth_service: Any = None
+
+
+def _resolve_group_from_tokens(auth_tokens: list[str] | None) -> str | None:
+    """Resolve the primary group from auth_tokens passed as a tool parameter.
+
+    Returns the first group from the first valid token, or None if
+    auth is disabled or no tokens provided.
+
+    Raises AuthError if tokens are provided but all are invalid.
+    """
+    if auth_service is None:
+        return None  # auth disabled (--no-auth)
+
+    if not auth_tokens:
+        return None  # anonymous → public
+
+    last_error: Exception | None = None
+    for raw_token in auth_tokens:
+        # Strip "Bearer " prefix if present
+        if raw_token.lower().startswith("bearer "):
+            raw_token = raw_token[7:].strip()
+        else:
+            raw_token = raw_token.strip()
+
+        if not raw_token:
+            continue
+
+        try:
+            token_info = auth_service.verify_token(raw_token)
+            if token_info.groups:
+                return token_info.groups[0]  # primary group = first in list
+            return None  # valid token, no groups → anonymous
+        except Exception as e:
+            if AuthError is not None and isinstance(e, AuthError):
+                last_error = e
+                continue  # try next token
+            raise  # unexpected error, propagate
+
+    # All tokens failed
+    if last_error:
+        raise last_error
+    return None
 templates_dir_override: str | None = None
 styles_dir_override: str | None = None
 web_url_override: str | None = None
@@ -370,6 +436,7 @@ async def handle_list_tools() -> List[Tool]:
                         "maximum": 1000000,
                         "default": 100000,
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["profile"],
             },
@@ -461,6 +528,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "integer",
                         "description": "Session chunk size in characters (default 4000). Only used when session storage is active.",
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["url"],
             },
@@ -514,6 +582,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "boolean",
                         "description": "Include heading hierarchy (h1\u2013h6) as an outline (default true).",
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["url"],
             },
@@ -538,6 +607,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "string",
                         "description": "Session GUID returned by get_content when session storage was used.",
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["session_id"],
             },
@@ -566,6 +636,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "integer",
                         "description": "Zero-based chunk index (0 to total_chunks-1).",
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["session_id", "chunk_index"],
             },
@@ -585,7 +656,9 @@ async def handle_list_tools() -> List[Tool]:
             ),
             inputSchema={
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    **AUTH_TOKENS_SCHEMA,
+                },
             },
             annotations=ToolAnnotations(
                 title="List Sessions",
@@ -616,6 +689,7 @@ async def handle_list_tools() -> List[Tool]:
                             "Auto-detected from GOFR_DIG_WEB_URL env or defaults to localhost if omitted."
                         ),
                     },
+                    **AUTH_TOKENS_SCHEMA,
                 },
                 "required": ["session_id"],
             },
@@ -897,9 +971,18 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
             # Use provided chunk_size or default to 4000
             c_size = chunk_size if chunk_size is not None else 4000
 
+            # Resolve group from auth_tokens
+            auth_tokens = arguments.get("auth_tokens")
+            try:
+                group = _resolve_group_from_tokens(auth_tokens)
+            except Exception as e:
+                if AuthError is not None and isinstance(e, AuthError):
+                    return _error_response("AUTH_ERROR", str(e))
+                raise
+
             try:
                 session_id = manager.create_session(
-                    url=url, content=page_data, chunk_size=c_size
+                    url=url, content=page_data, chunk_size=c_size, group=group,
                 )
 
                 # Get session info for response
@@ -1031,9 +1114,18 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         manager = get_session_manager()
         c_size = chunk_size if chunk_size is not None else 4000
 
+        # Resolve group from auth_tokens
+        auth_tokens = arguments.get("auth_tokens")
+        try:
+            group = _resolve_group_from_tokens(auth_tokens)
+        except Exception as e:
+            if AuthError is not None and isinstance(e, AuthError):
+                return _error_response("AUTH_ERROR", str(e))
+            raise
+
         try:
             session_id = manager.create_session(
-                url=url, content=results, chunk_size=c_size
+                url=url, content=results, chunk_size=c_size, group=group,
             )
             info = manager.get_session_info(session_id)
 
@@ -1171,13 +1263,23 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
     if not session_id:
         return _error_response("INVALID_ARGUMENT", "session_id is required")
 
+    auth_tokens = arguments.get("auth_tokens")
+    try:
+        group = _resolve_group_from_tokens(auth_tokens)
+    except Exception as e:
+        if AuthError is not None and isinstance(e, AuthError):
+            return _error_response("AUTH_ERROR", str(e))
+        raise
+
     try:
         manager = get_session_manager()
-        info = manager.get_session_info(session_id)
+        info = manager.get_session_info(session_id, group=group)
         return [_json_text(info)]
-    except GofrDigError as e:
-        return _exception_response(e)
     except Exception as e:
+        if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+            return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
+        if isinstance(e, GofrDigError):
+            return _exception_response(e)
         logger.error("Unexpected error in get_session_info", error=str(e), session_id=session_id)
         return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
 
@@ -1192,22 +1294,40 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
     if chunk_index is None:
         return _error_response("INVALID_ARGUMENT", "chunk_index is required")
 
+    auth_tokens = arguments.get("auth_tokens")
+    try:
+        group = _resolve_group_from_tokens(auth_tokens)
+    except Exception as e:
+        if AuthError is not None and isinstance(e, AuthError):
+            return _error_response("AUTH_ERROR", str(e))
+        raise
+
     try:
         manager = get_session_manager()
-        chunk_data = manager.get_chunk(session_id, chunk_index)
+        chunk_data = manager.get_chunk(session_id, chunk_index, group=group)
         return [_json_text(chunk_data)]
-    except GofrDigError as e:
-        return _exception_response(e)
     except Exception as e:
+        if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+            return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
+        if isinstance(e, GofrDigError):
+            return _exception_response(e)
         logger.error("Unexpected error in get_session_chunk", error=str(e), session_id=session_id, chunk_index=chunk_index)
         return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
 
 
 async def _handle_list_sessions(arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle list_sessions tool call."""
+    auth_tokens = arguments.get("auth_tokens")
+    try:
+        group = _resolve_group_from_tokens(auth_tokens)
+    except Exception as e:
+        if AuthError is not None and isinstance(e, AuthError):
+            return _error_response("AUTH_ERROR", str(e))
+        raise
+
     try:
         manager = get_session_manager()
-        sessions = manager.list_sessions()
+        sessions = manager.list_sessions(group=group)
         return [_json_text({"sessions": sessions, "total": len(sessions)})]
     except GofrDigError as e:
         return _exception_response(e)
@@ -1244,11 +1364,19 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
     if not session_id:
         return _error_response("INVALID_ARGUMENT", "session_id is required")
 
+    auth_tokens = arguments.get("auth_tokens")
+    try:
+        group = _resolve_group_from_tokens(auth_tokens)
+    except Exception as e:
+        if AuthError is not None and isinstance(e, AuthError):
+            return _error_response("AUTH_ERROR", str(e))
+        raise
+
     base_url = _resolve_web_base_url(arguments.get("base_url"))
 
     try:
         manager = get_session_manager()
-        info = manager.get_session_info(session_id)
+        info = manager.get_session_info(session_id, group=group)
         total_chunks = info["total_chunks"]
 
         chunk_urls = [
@@ -1267,9 +1395,11 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
                 }
             )
         ]
-    except GofrDigError as e:
-        return _exception_response(e)
     except Exception as e:
+        if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+            return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
+        if isinstance(e, GofrDigError):
+            return _exception_response(e)
         logger.error(
             "Unexpected error in get_session_urls",
             error=str(e),

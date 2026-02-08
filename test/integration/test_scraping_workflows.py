@@ -16,9 +16,15 @@ from mcp.client import streamable_http
 streamable_http_client = streamable_http.streamablehttp_client
 
 
-HOST = os.environ.get("GOFR_DIG_HOST", "localhost")
-MCP_PORT = os.environ.get("GOFR_DIG_MCP_PORT_TEST", "8170")
-MCP_URL = f"http://{HOST}:{MCP_PORT}/mcp"
+# Service URL — prefer full URL env var (set by run_tests.sh --docker/--no-docker),
+# fall back to host+port construction for backwards compatibility.
+MCP_URL = os.environ.get(
+    "GOFR_DIG_MCP_URL",
+    "http://{}:{}/mcp".format(
+        os.environ.get("GOFR_DIG_HOST", "localhost"),
+        os.environ.get("GOFR_DIG_MCP_PORT_TEST", "8170"),
+    ),
+)
 
 
 def parse_json(result) -> dict:

@@ -77,18 +77,21 @@ else
     export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 fi
 
-# Test configuration — use test ports (prod + 100) from centralized config
+# Test configuration
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_TOKEN_STORE="${LOG_DIR}/${PROJECT_NAME}_tokens_test.json"
 export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-memory}"
-export GOFR_DIG_HOST="${GOFR_DIG_HOST:-localhost}"
-export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST:-8170}"
-export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
-export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST:-8172}"
 # Also export _TEST vars so integration tests pick them up directly
 export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:-8170}"
 export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
 export GOFR_DIG_WEB_PORT_TEST="${GOFR_DIG_WEB_PORT_TEST:-8172}"
+
+# Docker vs localhost addressing — set after argument parsing (see apply_docker_mode below)
+# Defaults are overridden by --docker / --no-docker flags
+export GOFR_DIG_HOST="${GOFR_DIG_HOST:-localhost}"
+export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST:-8170}"
+export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
+export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST:-8172}"
 
 # Ensure directories exist
 mkdir -p "${LOG_DIR}"
@@ -102,9 +105,14 @@ print_header() {
     echo -e "${GREEN}=== ${PROJECT_NAME} Test Runner ===${NC}"
     echo "Project root: ${PROJECT_ROOT}"
     echo "Environment: ${GOFR_DIG_ENV}"
-    echo "MCP Port (test): ${GOFR_DIG_MCP_PORT}"
-    echo "MCPO Port (test): ${GOFR_DIG_MCPO_PORT}"
-    echo "Web Port (test): ${GOFR_DIG_WEB_PORT}"
+    if [ "$USE_DOCKER" = true ]; then
+        echo "Addressing: Docker hostnames (container network)"
+    else
+        echo "Addressing: localhost (published ports)"
+    fi
+    echo "MCP URL:  ${GOFR_DIG_MCP_URL}"
+    echo "MCPO URL: ${GOFR_DIG_MCPO_URL}"
+    echo "Web URL:  ${GOFR_DIG_WEB_URL}"
     echo ""
 }
 
@@ -146,6 +154,7 @@ RUN_INTEGRATION=false
 RUN_ALL=false
 STOP_ONLY=false
 CLEANUP_ONLY=false
+USE_DOCKER=true   # Default: use Docker container hostnames for integration tests
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -178,6 +187,14 @@ while [[ $# -gt 0 ]]; do
             START_SERVERS=false
             shift
             ;;
+        --docker)
+            USE_DOCKER=true
+            shift
+            ;;
+        --no-docker)
+            USE_DOCKER=false
+            shift
+            ;;
         --with-servers|--start-servers)
             START_SERVERS=true
             shift
@@ -199,6 +216,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --unit           Run unit tests only (no servers)"
             echo "  --integration    Run integration tests only (with servers)"
             echo "  --all            Run all test categories"
+            echo "  --docker         Use Docker hostnames for integration tests (default)"
+            echo "  --no-docker      Use localhost+published ports for integration tests"
             echo "  --no-servers     Don't start Docker services"
             echo "  --with-servers   Start Docker services (default)"
             echo "  --stop           Stop Docker services and exit"
@@ -212,6 +231,47 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# =============================================================================
+# APPLY DOCKER / LOCALHOST ADDRESSING MODE
+# =============================================================================
+
+if [ "$USE_DOCKER" = true ]; then
+    # Docker mode: use container hostnames + internal (prod) ports.
+    # The dev container and test containers share gofr-test-net.
+    # Containers listen on prod ports internally (8070/8071/8072).
+    _MCP_INTERNAL="${GOFR_DIG_MCP_PORT_INTERNAL:-8070}"
+    _MCPO_INTERNAL="${GOFR_DIG_MCPO_PORT_INTERNAL:-8071}"
+    _WEB_INTERNAL="${GOFR_DIG_WEB_PORT_INTERNAL:-8072}"
+
+    export GOFR_DIG_HOST="gofr-dig-mcp-test"
+    export GOFR_DIG_MCP_PORT="${_MCP_INTERNAL}"
+    export GOFR_DIG_MCPO_PORT="${_MCPO_INTERNAL}"
+    export GOFR_DIG_WEB_PORT="${_WEB_INTERNAL}"
+
+    # Full URLs for integration tests (container hostname + internal port)
+    export GOFR_DIG_MCP_URL="http://gofr-dig-mcp-test:${_MCP_INTERNAL}/mcp"
+    export GOFR_DIG_MCPO_URL="http://gofr-dig-mcpo-test:${_MCPO_INTERNAL}"
+    export GOFR_DIG_WEB_URL="http://gofr-dig-web-test:${_WEB_INTERNAL}"
+
+    # Fixture server: bind to 0.0.0.0 so test containers can reach it.
+    # Use dev container hostname on the shared network.
+    export GOFR_DIG_FIXTURE_HOST="0.0.0.0"
+    export GOFR_DIG_FIXTURE_EXTERNAL_HOST="gofr-dig-dev"
+else
+    # Localhost mode: use published test ports (prod + 100).
+    export GOFR_DIG_HOST="localhost"
+    export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST}"
+    export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST}"
+    export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST}"
+
+    export GOFR_DIG_MCP_URL="http://localhost:${GOFR_DIG_MCP_PORT}/mcp"
+    export GOFR_DIG_MCPO_URL="http://localhost:${GOFR_DIG_MCPO_PORT}"
+    export GOFR_DIG_WEB_URL="http://localhost:${GOFR_DIG_WEB_PORT}"
+
+    export GOFR_DIG_FIXTURE_HOST="127.0.0.1"
+    export GOFR_DIG_FIXTURE_EXTERNAL_HOST="127.0.0.1"
+fi
 
 # =============================================================================
 # MAIN EXECUTION

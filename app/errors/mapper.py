@@ -60,6 +60,10 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "INVALID_ARGUMENT": "A required argument is missing or invalid. Check the tool schema for required parameters.",
     "INVALID_MAX_TOKENS": "max_tokens must be between 1000 and 1000000. Default is 100000 (~400K characters).",
     
+    # Auth errors
+    "AUTH_ERROR": "Provide a valid JWT token in the auth_tokens parameter.",
+    "PERMISSION_DENIED": "Your token's groups do not include the group that owns this session.",
+
     # Session errors
     "SESSION_ERROR": "Session operation failed. Use list_sessions to check available sessions.",
     "SESSION_NOT_FOUND": "Session ID not found. Use list_sessions to discover sessions, or create one with get_content(session=true).",

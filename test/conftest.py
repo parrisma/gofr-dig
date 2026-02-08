@@ -305,10 +305,22 @@ def image_server():
 
 
 class HTMLFixtureServer:
-    """Simple HTTP server for serving HTML test fixtures."""
+    """Simple HTTP server for serving HTML test fixtures.
+
+    Bind address and external hostname are controlled by env vars so that
+    Docker-based integration tests (where test containers need to reach this
+    server over the shared network) work alongside local runs.
+
+    Env vars (set by run_tests.sh --docker / --no-docker):
+      GOFR_DIG_FIXTURE_HOST          — bind address (default 0.0.0.0)
+      GOFR_DIG_FIXTURE_EXTERNAL_HOST — hostname used in URLs returned by
+                                        get_url() / base_url (default 127.0.0.1)
+    """
 
     def __init__(self, port: int = 8766):
         self.port = port
+        self._bind_host = os.environ.get("GOFR_DIG_FIXTURE_HOST", "0.0.0.0")
+        self._external_host = os.environ.get("GOFR_DIG_FIXTURE_EXTERNAL_HOST", "127.0.0.1")
         self._server = None
         self._thread = None
         self._fixtures_dir = Path(__file__).parent / "fixtures" / "html"
@@ -328,7 +340,7 @@ class HTMLFixtureServer:
             def log_message(self, format, *args):  # noqa: A002, ARG002
                 pass  # Suppress logging
 
-        self._server = http.server.HTTPServer(("127.0.0.1", self.port), Handler)
+        self._server = http.server.HTTPServer((self._bind_host, self.port), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
@@ -344,12 +356,12 @@ class HTMLFixtureServer:
     def get_url(self, path: str = "") -> str:
         """Get the full URL for a path on this server."""
         path = path.lstrip("/")
-        return f"http://127.0.0.1:{self.port}/{path}"
+        return f"http://{self._external_host}:{self.port}/{path}"
 
     @property
     def base_url(self) -> str:
         """Get the base URL of the server."""
-        return f"http://127.0.0.1:{self.port}"
+        return f"http://{self._external_host}:{self.port}"
 
 
 @pytest.fixture(scope="function")

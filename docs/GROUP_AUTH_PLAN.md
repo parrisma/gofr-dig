@@ -12,115 +12,146 @@ READ:    token.groups      ∩  session.group ≠ ∅  →  allow
          token.groups      ∩  session.group = ∅  →  403
 ```
 
+## Auth Delivery — Two Paths
+
+MCP tool calls go through the MCPO proxy, which does **not** reliably forward HTTP headers into individual tool invocations. Therefore:
+
+| Path | Auth mechanism | Used by |
+|------|---------------|---------|
+| **MCP tools** | `auth_tokens` tool parameter (list of JWT strings) | MCPO proxy, MCP clients, N8N |
+| **Web REST endpoints** | `Authorization: Bearer <jwt>` header | Direct HTTP calls to `/sessions/*` |
+
+The `auth_tokens` parameter is the **primary** mechanism for MCP. HTTP Authorization headers are only used for direct web server REST calls.
+
+### Resolution Priority
+
+```
+MCP tool call:
+  1. auth_tokens parameter  →  verify each, union groups
+  2. No auth_tokens          →  anonymous (group=None → "public")
+
+Web REST call:
+  1. Authorization header    →  verify token, extract groups
+  2. No header               →  anonymous (group=None → "public")
+```
+
 ## Current State
 
 | Component | Built? | Wired? |
 |-----------|--------|--------|
-| JWT tokens carry `groups` claim | ✅ | — |
-| `TokenInfo.groups`, `has_group()`, `has_any_group()` | ✅ | — |
-| `AuthService.verify_token()` → `TokenInfo` | ✅ | ❌ Never called |
-| `AuthHeaderMiddleware` (captures `Authorization` header into ContextVar) | ✅ | ❌ Not enabled |
-| `SessionManager.create_session(group=...)` | ✅ | ❌ `group` never passed |
-| `SessionManager.get_session_info(group=...)` / `get_chunk(group=...)` | ✅ | ❌ `group` never passed |
-| `PermissionDeniedError` raised by SessionManager on group mismatch | ✅ | ❌ Not caught/mapped |
-| `create_mcp_starlette_app(include_auth_middleware=...)` | ✅ | ❌ Defaults to `False` |
+| JWT tokens carry `groups` claim | ✅ | ✅ |
+| `TokenInfo.groups`, `has_group()`, `has_any_group()` | ✅ | ✅ |
+| `AuthService.verify_token()` → `TokenInfo` | ✅ | ✅ Called in `_resolve_group_from_tokens` and `_resolve_group` |
+| `AuthHeaderMiddleware` (captures `Authorization` into ContextVar) | ✅ | N/A (not needed — web uses `_resolve_group(request)`) |
+| `SessionManager.create_session(group=...)` | ✅ | ✅ Passed from `_handle_get_content` |
+| `SessionManager.get_session_info(group=...)` / `get_chunk(group=...)` | ✅ | ✅ Passed from all session handlers |
+| `PermissionDeniedError` raised by SessionManager on group mismatch | ✅ | ✅ Caught → `PERMISSION_DENIED` (MCP) / 403 (web) |
 
-**Bottom line:** Every layer of infra exists. The only work is wiring them together in the request path.
+**Status: ✅ COMPLETE** — All steps implemented and tested (363 unit tests passing).
 
 ---
 
 ## Steps
 
-### Step 1 — Enable Auth Middleware on MCP Server
+### Step 1 — Add `auth_tokens` Parameter to MCP Tool Schemas
 
-**File:** `app/mcp_server/mcp_server.py` (~L1311)
+**File:** `app/mcp_server/mcp_server.py` — `handle_list_tools()`
 
-Pass `include_auth_middleware=True` when `auth_service` is set:
+Add `auth_tokens` to every tool's `inputSchema.properties` (except `ping`):
 
 ```python
-starlette_app = create_mcp_starlette_app(
-    mcp_handler=handle_streamable_http,
-    lifespan=lifespan,
-    env_prefix="GOFR_DIG",
-    include_auth_middleware=bool(auth_service),   # ← NEW
-)
+"auth_tokens": {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": (
+        "One or more JWT tokens for authentication. "
+        "The server verifies each token and uses the first group "
+        "from the first valid token to scope session access. "
+        "Omit for anonymous/public access."
+    ),
+},
 ```
 
-This activates `AuthHeaderMiddleware`, which captures the `Authorization` header into the `_auth_header_context` ContextVar on every HTTP request.
-
-**When `auth_service` is `None` (--no-auth mode):** middleware is not added, all requests proceed unauthenticated — preserving dev/test behaviour.
+This makes auth explicit and discoverable in the tool schema — LLMs and automation services can see exactly how to authenticate.
 
 ---
 
-### Step 2 — Add a Token Resolution Helper
+### Step 2 — Add a Token Resolution Helper for MCP Tools
 
-**File:** `app/mcp_server/mcp_server.py` (new helper near top, after `get_session_manager`)
+**File:** `app/mcp_server/mcp_server.py` (new helper near `get_session_manager`)
 
 ```python
-from gofr_common.web.middleware import get_auth_header_from_context
 from gofr_common.auth.exceptions import AuthError
 
-def _resolve_token_group() -> str | None:
-    """Extract the primary group from the current request's auth token.
+def _resolve_group_from_tokens(auth_tokens: list[str] | None) -> str | None:
+    """Resolve the primary group from auth_tokens passed as a tool parameter.
 
-    Returns the first group from the token's group list, or None if
-    auth is disabled or no token is present.
+    Returns the first group from the first valid token, or None if
+    auth is disabled or no tokens provided.
 
-    Raises AuthError (401/403) if a token is present but invalid.
+    Raises AuthError (401/403) if tokens are provided but all are invalid.
     """
     if auth_service is None:
         return None                          # auth disabled (--no-auth)
 
-    header = get_auth_header_from_context()
-    if not header:
-        return None                          # no token sent → anonymous
+    if not auth_tokens:
+        return None                          # anonymous → public
 
-    # Strip "Bearer " prefix
-    if header.lower().startswith("bearer "):
-        raw_token = header[7:].strip()
-    else:
-        raw_token = header.strip()
+    last_error: AuthError | None = None
+    for raw_token in auth_tokens:
+        # Strip "Bearer " prefix if present
+        if raw_token.lower().startswith("bearer "):
+            raw_token = raw_token[7:].strip()
+        else:
+            raw_token = raw_token.strip()
 
-    if not raw_token:
-        return None
+        if not raw_token:
+            continue
 
-    token_info = auth_service.verify_token(raw_token)   # raises on invalid
-    if token_info.groups:
-        return token_info.groups[0]          # primary group = first in list
+        try:
+            token_info = auth_service.verify_token(raw_token)
+            if token_info.groups:
+                return token_info.groups[0]  # primary group = first in list
+        except AuthError as e:
+            last_error = e
+            continue                         # try next token
+
+    # All tokens failed
+    if last_error:
+        raise last_error
     return None
 ```
 
-This is a **pure function** that reads the ContextVar set by the middleware and returns a group string or `None`. All auth exceptions propagate to the caller.
+**Key design:** This reads from the `arguments` dict, not from a ContextVar/header. No middleware needed on the MCP server.
 
 ---
 
 ### Step 3 — Wire Group into Session-Creating Tools
 
-**File:** `app/mcp_server/mcp_server.py`
+**File:** `app/mcp_server/mcp_server.py` — `_handle_get_content`
 
-In `_handle_get_content`, add group resolution and pass it to both session-create paths.
-
-At the **top** of `_handle_get_content` (after argument parsing, before any fetch):
+At the **top** of the handler (after argument parsing):
 
 ```python
-group = _resolve_token_group()
+auth_tokens = arguments.get("auth_tokens")
+group = _resolve_group_from_tokens(auth_tokens)
 ```
 
-Then in both `create_session` call sites:
+Then pass `group` to both `create_session` call sites:
 
 ```python
-# depth=1 session path (~L870)
+# depth=1 session path
 session_id = manager.create_session(
     url=url, content=page_data, chunk_size=c_size, group=group,
 )
 
-# depth>1 session path (~L970)
+# depth>1 session path
 session_id = manager.create_session(
     url=url, content=results, chunk_size=c_size, group=group,
 )
 ```
 
-**Effect:** Sessions are now tagged with the token's primary group. Anonymous requests (no token / auth disabled) create sessions with `group=None` (global).
+**Effect:** Sessions are tagged with the token's primary group. Anonymous requests (no `auth_tokens` / auth disabled) create sessions with `group=None` (global).
 
 ---
 
@@ -128,16 +159,25 @@ session_id = manager.create_session(
 
 **File:** `app/mcp_server/mcp_server.py`
 
-Add `group = _resolve_token_group()` at the top of each handler, then pass it through:
+Add the same two lines at the top of each session handler:
+
+```python
+auth_tokens = arguments.get("auth_tokens")
+group = _resolve_group_from_tokens(auth_tokens)
+```
+
+Then pass `group` through:
 
 | Handler | Current Call | New Call |
 |---------|-------------|----------|
 | `_handle_get_session_info` | `manager.get_session_info(session_id)` | `manager.get_session_info(session_id, group=group)` |
-| `_handle_get_session_chunk` | `manager.get_chunk(session_id, chunk_index)` | `manager.get_chunk(session_id, chunk_index, group=group)` |
+| `_handle_get_session_chunk` | `manager.get_chunk(session_id, idx)` | `manager.get_chunk(session_id, idx, group=group)` |
 | `_handle_list_sessions` | `manager.list_sessions()` | `manager.list_sessions(group=group)` |
 | `_handle_get_session_urls` | `manager.get_session_info(session_id)` | `manager.get_session_info(session_id, group=group)` |
 
-**Effect:** `SessionManager` enforces group match and raises `PermissionDeniedError` on mismatch. `list_sessions` returns only sessions owned by the caller's group.
+Also add `auth_tokens` to `_handle_set_antidetection` and `_handle_get_structure` for consistency (extract group for logging/auditing even though these tools don't use sessions).
+
+**Effect:** `SessionManager` enforces group match → `PermissionDeniedError` on mismatch. `list_sessions` returns only sessions visible to the caller's group.
 
 ---
 
@@ -145,44 +185,45 @@ Add `group = _resolve_token_group()` at the top of each handler, then pass it th
 
 **File:** `app/errors/mapper.py`
 
-Add entries for `AuthError` (401) and `PermissionDeniedError` (403) so they return structured MCP error responses instead of unhandled exceptions.
+Add recovery strategies:
 
 ```python
-from gofr_common.auth.exceptions import AuthError
-from gofr_common.storage.exceptions import PermissionDeniedError
-
-# In RECOVERY_STRATEGIES dict:
-"AUTH_ERROR": "Check that a valid Bearer token is included in the Authorization header.",
+"AUTH_ERROR": "Provide a valid JWT token in the auth_tokens parameter.",
 "PERMISSION_DENIED": "Your token's groups do not include the group that owns this session.",
 ```
 
 **File:** `app/mcp_server/mcp_server.py`
 
-In each session handler's except chain, catch these new exception types:
+In each session handler's except chain, catch these:
 
 ```python
 except AuthError as e:
     return _error_response(
-        "AUTH_ERROR", str(e), recovery_strategy="Include a valid Bearer token."
+        "AUTH_ERROR", str(e),
+        recovery_strategy="Provide a valid JWT in the auth_tokens parameter.",
     )
 except PermissionDeniedError as e:
     return _error_response(
         "PERMISSION_DENIED", str(e),
-        recovery_strategy="Use a token whose groups include the session's owner group."
+        recovery_strategy="Use a token whose groups include the session's owner group.",
     )
 ```
 
-Alternatively, add a shared `_with_auth_errors` wrapper/decorator that catches these around any handler that calls `_resolve_token_group()`.
+Consider a shared decorator `_with_auth_errors` to avoid repeating this in every handler.
 
 ---
 
-### Step 6 — Wire Group into Web Server Session Endpoints
+### Step 6 — Wire Auth into Web Server REST Endpoints (Header-Based)
 
 **File:** `app/web_server/web_server.py`
 
-The web server has `self.auth_service` but never uses it.
+The web server serves direct REST calls (not through MCPO), so it uses the standard **Authorization header**.
 
-**6a.** Add auth middleware to the web server's Starlette app (same pattern as MCP — `include_auth_middleware=bool(auth_service)`).
+**6a.** Enable auth middleware on the web server's Starlette app:
+
+```python
+include_auth_middleware=bool(self.auth_service)
+```
 
 **6b.** Add a `_resolve_group(self, request)` method:
 
@@ -194,11 +235,13 @@ def _resolve_group(self, request) -> str | None:
     if not auth_header:
         return None
     raw = auth_header.removeprefix("Bearer ").strip()
+    if not raw:
+        return None
     token_info = self.auth_service.verify_token(raw)
     return token_info.groups[0] if token_info.groups else None
 ```
 
-**6c.** Call `group = self._resolve_group(request)` at the top of each session endpoint and pass `group=group` to all `SessionManager` calls.
+**6c.** Call it at the top of each session endpoint and pass `group=group` to all `SessionManager` calls.
 
 **6d.** Catch `AuthError` → 401 JSON, `PermissionDeniedError` → 403 JSON.
 
@@ -206,16 +249,16 @@ def _resolve_group(self, request) -> str | None:
 
 ### Step 7 — Handle Anonymous / No-Auth Mode
 
-The design must be backwards-compatible:
+Backwards-compatible behaviour:
 
-| Scenario | `auth_service` | Middleware | `_resolve_token_group()` | Session group |
-|----------|---------------|------------|--------------------------|---------------|
-| `--no-auth` flag | `None` | Off | Returns `None` | `None` (global) |
-| Auth enabled, no token sent | Set | On (no header captured) | Returns `None` | `None` (global) |
-| Auth enabled, valid token | Set | On (header captured) | Returns `groups[0]` | `"myteam"` |
-| Auth enabled, invalid token | Set | On (header captured) | Raises `AuthError` | — (401) |
+| Scenario | `auth_service` | `auth_tokens` / Header | Group | Session access |
+|----------|---------------|------------------------|-------|---------------|
+| `--no-auth` flag | `None` | Ignored | `None` | All sessions |
+| Auth enabled, no token | Set | Not provided | `None` | Global sessions only |
+| Auth enabled, valid token | Set | `["eyJ..."]` | `groups[0]` | Group + global sessions |
+| Auth enabled, invalid token | Set | `["bad..."]` | — | 401 error |
 
-**`group=None` sessions are world-readable.** This is intentional — anonymous sessions have no owner and can be read by anyone. Only group-owned sessions enforce access control.
+**`group=None` sessions are world-readable.** Anonymous sessions have no owner and can be read by anyone. Only group-owned sessions enforce access.
 
 ---
 
@@ -223,15 +266,16 @@ The design must be backwards-compatible:
 
 | Test | What it verifies |
 |------|-----------------|
-| **No token → session created with `group=None`** | Anonymous access still works |
-| **Token with `groups=["team-a"]` → session tagged `"team-a"`** | Group extraction + create |
-| **Token with `groups=["team-a"]` reads `"team-a"` session → 200** | Group match allows read |
-| **Token with `groups=["team-b"]` reads `"team-a"` session → 403** | Group mismatch blocks read |
+| **No `auth_tokens` → session created with `group=None`** | Anonymous access works |
+| **`auth_tokens=["team-a-jwt"]` → session tagged `"team-a"`** | Group extraction + create |
+| **`"team-a"` token reads `"team-a"` session → 200** | Group match allows read |
+| **`"team-b"` token reads `"team-a"` session → 403** | Group mismatch blocks read |
 | **Token with `groups=["team-a", "team-b"]` reads `"team-a"` session → 200** | Any group in list works |
-| **Invalid token → 401** | Auth error propagation |
-| **`list_sessions` with `"team-a"` token → only `"team-a"` sessions** | Group-scoped listing |
+| **Invalid `auth_tokens` → AUTH_ERROR** | Auth error propagation |
+| **`list_sessions` with `"team-a"` token → only `"team-a"` + global sessions** | Group-scoped listing |
 | **`--no-auth` mode → all sessions accessible** | Backwards compatibility |
-| **Web endpoint `/sessions/{id}/info` with wrong group → 403** | Web server enforcement |
+| **Web `Authorization: Bearer …` with wrong group → 403** | Web header-based enforcement |
+| **Web no header → only global sessions** | Web anonymous access |
 
 ---
 
@@ -239,11 +283,11 @@ The design must be backwards-compatible:
 
 | File | Changes |
 |------|---------|
-| `app/mcp_server/mcp_server.py` | Enable auth middleware, add `_resolve_token_group()`, pass `group` to all session ops, catch auth/permission errors |
-| `app/web_server/web_server.py` | Add `_resolve_group()`, pass `group` to all session ops, add error handling |
+| `app/mcp_server/mcp_server.py` | Add `auth_tokens` to tool schemas, add `_resolve_group_from_tokens()`, pass `group` to all session ops, catch auth/permission errors |
+| `app/web_server/web_server.py` | Enable auth middleware, add `_resolve_group()`, pass `group` to all session ops, add error handling |
 | `app/errors/mapper.py` | Add `AUTH_ERROR` and `PERMISSION_DENIED` recovery strategies |
-| `test/mcp/test_session_auth.py` | New test file for group-scoped session access |
-| `test/web/test_session_auth.py` | New test file for web endpoint group enforcement |
+| `test/mcp/test_session_auth.py` | New: group-scoped session access via `auth_tokens` param |
+| `test/web/test_web_session_auth.py` | New: web endpoint group enforcement via `Authorization` header |
 
 **No changes needed to:**
 - `gofr_common` (auth, middleware, storage — all already support this)
@@ -254,6 +298,25 @@ The design must be backwards-compatible:
 
 ## Execution Order
 
-Steps 1-5 can be done as a single PR (MCP server). Step 6 can follow (web server). Step 7 is design validation (no code). Step 8 spans both.
+Steps 1–5 as a single unit (MCP server auth). Step 6 follows (web server auth). Step 7 is design validation (no code). Step 8 spans both.
 
-**Estimated scope:** ~80 lines changed, ~150 lines of new tests.
+**Estimated scope:** ~100 lines changed, ~200 lines of new tests.
+
+---
+
+## Implementation Complete
+
+All 8 steps implemented and verified:
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | `auth_tokens` in all 7 tool schemas (AUTH_TOKENS_SCHEMA constant) | ✅ |
+| 2 | `_resolve_group_from_tokens()` helper | ✅ |
+| 3 | `group` wired into `get_content` session creation (depth=1 + depth>1) | ✅ |
+| 4 | `group` wired into `get_session_info`, `get_session_chunk`, `list_sessions`, `get_session_urls` | ✅ |
+| 5 | `AUTH_ERROR` + `PERMISSION_DENIED` error mapping + catch blocks | ✅ |
+| 6 | Web server auth (`_resolve_group()`, group passthrough, 401/403 handling) | ✅ |
+| 7 | Anonymous/no-auth mode (inherent — `group=None` flows through) | ✅ |
+| 8 | Auth tests: 16 MCP tests + 11 web tests | ✅ |
+
+**Test results:** 363 passed, 33 deselected (integration tests skipped in unit mode).

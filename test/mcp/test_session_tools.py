@@ -84,7 +84,7 @@ async def test_get_session_info(mock_session_manager):
             {"session_id": "mock-session-id"}
         )
         
-        mock_session_manager.get_session_info.assert_called_with("mock-session-id")
+        mock_session_manager.get_session_info.assert_called_with("mock-session-id", group=None)
         response = json.loads(result[0].text)  # type: ignore
         assert response["total_chunks"] == 5
 
@@ -96,7 +96,7 @@ async def test_get_session_chunk(mock_session_manager):
             {"session_id": "mock-session-id", "chunk_index": 0}
         )
         
-        mock_session_manager.get_chunk.assert_called_with("mock-session-id", 0)
+        mock_session_manager.get_chunk.assert_called_with("mock-session-id", 0, group=None)
         response = json.loads(result[0].text)  # type: ignore
         assert response == "Mock chunk content"
 
@@ -129,7 +129,7 @@ async def test_list_sessions(mock_session_manager):
     with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
         result = await handle_call_tool("list_sessions", {})
 
-        mock_session_manager.list_sessions.assert_called_once()
+        mock_session_manager.list_sessions.assert_called_once_with(group=None)
         response = json.loads(result[0].text)  # type: ignore
         assert response["total"] == 2
         assert len(response["sessions"]) == 2

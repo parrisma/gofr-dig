@@ -11,6 +11,9 @@
 - Paths: use `Config.get_storage_dir() / "subdir"`, never string paths.
 - Dev container: avoid `localhost`/`127.0.0.1` for service URLs; use container service names or the published host ports.
 
+## TESTING
+Always use scripts/run_tests.sh to run tests (sets PYTHONPATH, env vars, etc) and modify this script if it does not do what is needed or needs enhancing to manage en set up/teardown.
+
 ## MCP Tools (current)
 `ping`, `set_antidetection`, `get_content`, `get_structure`, `get_session_info`, `get_session_chunk`, `list_sessions`
 
