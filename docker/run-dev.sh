@@ -85,6 +85,23 @@ if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     exit 1
 fi
 
+# Ensure gofr-common submodule is initialised
+COMMON_DIR="$PROJECT_ROOT/lib/gofr-common"
+if [ ! -f "$COMMON_DIR/pyproject.toml" ]; then
+    echo "gofr-common submodule not initialised — initialising now..."
+    cd "$PROJECT_ROOT"
+    git submodule update --init --recursive
+    if [ ! -f "$COMMON_DIR/pyproject.toml" ]; then
+        echo ""
+        echo "ERROR: Failed to initialise gofr-common submodule."
+        echo "  $COMMON_DIR still has no pyproject.toml."
+        echo "  Try manually: cd $PROJECT_ROOT && git submodule update --init --recursive"
+        echo ""
+        exit 1
+    fi
+    echo "gofr-common submodule initialised OK."
+fi
+
 # ---- Run container ----------------------------------------------------------
 # NOTE: No host port bindings — the dev container is for code editing.
 # Production containers (via start-prod.sh) own ports 8070-8072.
