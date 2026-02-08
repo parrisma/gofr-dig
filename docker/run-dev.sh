@@ -74,10 +74,22 @@ else
     echo "Warning: Docker socket not found at $DOCKER_SOCKET - docker commands will not work inside container"
 fi
 
-# Run container
+# ---- Pre-flight checks ------------------------------------------------------
+
+# Verify image exists
+if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+    echo ""
+    echo "ERROR: Image '$IMAGE_NAME' not found."
+    echo "  Build it first:  ./docker/build-dev.sh"
+    echo ""
+    exit 1
+fi
+
+# ---- Run container ----------------------------------------------------------
 # NOTE: No host port bindings — the dev container is for code editing.
 # Production containers (via start-prod.sh) own ports 8070-8072.
-docker run -d \
+echo "Running: docker run -d --name $CONTAINER_NAME ..."
+CONTAINER_ID=$(docker run -d \
     --name "$CONTAINER_NAME" \
     --network "$DOCKER_NETWORK" \
     -v "$PROJECT_ROOT:/home/gofr/devroot/gofr-dig:rw" \
@@ -86,17 +98,50 @@ docker run -d \
     -e GOFRDIG_ENV=development \
     -e GOFRDIG_DEBUG=true \
     -e GOFRDIG_LOG_LEVEL=DEBUG \
-    "$IMAGE_NAME"
+    "$IMAGE_NAME" 2>&1) || {
+    echo ""
+    echo "ERROR: docker run failed."
+    echo "  Output: $CONTAINER_ID"
+    echo ""
+    exit 1
+}
 
+# ---- Verify container is actually running -----------------------------------
+echo "Waiting for container to stabilise..."
+sleep 2
+
+CONTAINER_STATE=$(docker inspect --format '{{.State.Status}}' "$CONTAINER_NAME" 2>/dev/null || echo "not_found")
+CONTAINER_RUNNING=$(docker inspect --format '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo "false")
+
+if [[ "$CONTAINER_STATE" != "running" || "$CONTAINER_RUNNING" != "true" ]]; then
+    EXIT_CODE=$(docker inspect --format '{{.State.ExitCode}}' "$CONTAINER_NAME" 2>/dev/null || echo "?")
+    echo ""
+    echo "======================================================================="
+    echo "ERROR: Container '$CONTAINER_NAME' is NOT running"
+    echo "======================================================================="
+    echo "  State:     $CONTAINER_STATE"
+    echo "  Exit code: $EXIT_CODE"
+    echo ""
+    echo "  Last 20 lines of container logs:"
+    echo "  ---------------------------------"
+    docker logs --tail 20 "$CONTAINER_NAME" 2>&1 | sed 's/^/  /'
+    echo ""
+    echo "  Full logs:  docker logs $CONTAINER_NAME"
+    echo "  Inspect:    docker inspect $CONTAINER_NAME"
+    echo ""
+    exit 1
+fi
+
+# ---- Success ----------------------------------------------------------------
 echo ""
 echo "======================================================================="
-echo "Container started: $CONTAINER_NAME"
+echo "Container RUNNING: $CONTAINER_NAME"
 echo "======================================================================="
-echo ""
-echo "Ports: none published (dev container is for code editing)"
-echo "  Production ports are owned by start-prod.sh"
-echo ""
-echo "Docker: $( [ -n "$DOCKER_GID_ARGS" ] && echo 'socket mounted (DinD ready)' || echo 'socket NOT mounted' )"
+echo "  ID:      ${CONTAINER_ID:0:12}"
+echo "  State:   $CONTAINER_STATE"
+echo "  Image:   $IMAGE_NAME"
+echo "  Network: $DOCKER_NETWORK"
+echo "  Docker:  $( [ -n "$DOCKER_GID_ARGS" ] && echo 'socket mounted (DinD ready)' || echo 'socket NOT mounted' )"
 echo ""
 echo "Useful commands:"
 echo "  docker logs -f $CONTAINER_NAME          # Follow logs"
