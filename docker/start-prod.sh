@@ -184,14 +184,21 @@ else
 
     # AppRole credentials are baked into the prod image at /run/secrets/vault_creds
     # (via Dockerfile.prod COPY from lib/gofr-common/secrets/service_creds/gofr-dig.json)
-    # Check they exist in source so the next --build will include them.
-    VAULT_CREDS_FILE="$PROJECT_ROOT/lib/gofr-common/secrets/service_creds/gofr-dig.json"
-    if [ -f "$VAULT_CREDS_FILE" ]; then
-        ok "Vault AppRole credentials found (baked into image)"
+    # Ensure they exist — auto-provision if Vault is available.
+    ENSURE_APPROLE="$PROJECT_ROOT/scripts/ensure_approle.sh"
+    if [ -x "$ENSURE_APPROLE" ]; then
+        "$ENSURE_APPROLE" || {
+            warn "AppRole provisioning failed — continuing anyway (auth may not work)"
+            warn "Run manually: $ENSURE_APPROLE"
+        }
     else
-        warn "No AppRole credentials at $VAULT_CREDS_FILE"
-        warn "Run: GOFR_VAULT_URL=http://gofr-vault:8201 uv run scripts/setup_approle.py"
-        warn "Then rebuild image: $0 --build"
+        VAULT_CREDS_FILE="$PROJECT_ROOT/lib/gofr-common/secrets/service_creds/gofr-dig.json"
+        if [ -f "$VAULT_CREDS_FILE" ]; then
+            ok "Vault AppRole credentials found (baked into image)"
+        else
+            warn "No AppRole credentials and ensure_approle.sh not executable"
+            warn "Run: chmod +x scripts/ensure_approle.sh && scripts/ensure_approle.sh"
+        fi
     fi
 fi
 
