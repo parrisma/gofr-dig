@@ -52,21 +52,22 @@ services:
       - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-DEBUG}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
-      # Auth backend (vault, file, or memory) — set by start-dev.sh if auth enabled
-      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-memory}
+      # Auth backend (vault only)
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
       - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT_TEST}}:${GOFR_DIG_MCP_PORT}"
+    volumes:
+      - sessions-data:/home/gofr-dig/data/storage/sessions
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 15s
-    # No persistent volumes — ephemeral
 
   # ==========================================================================
   # 2. MCPO Server (OpenAPI Wrapper)
@@ -115,14 +116,18 @@ services:
       - GOFR_DIG_ENV=TEST
       - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
       - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-DEBUG}
-      # Auth backend — same as MCP
-      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-memory}
+      - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
+      - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
+      # Auth backend — vault only
+      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
       - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT_TEST}}:${GOFR_DIG_WEB_PORT}"
+    volumes:
+      - sessions-data:/home/gofr-dig/data/storage/sessions
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
       interval: 15s
@@ -140,5 +145,8 @@ networks:
     # Create manually if needed: docker network create gofr-test-net
 
 # ==========================================================================
-# No Volumes — All services use ephemeral storage
+# Volumes — Shared ephemeral storage for cross-service session access
 # ==========================================================================
+volumes:
+  sessions-data:
+    # Ephemeral — destroyed with 'docker compose down -v'

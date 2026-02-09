@@ -188,7 +188,10 @@ Session-aware structured logger (`app/logger/`).
 |---|---|---|
 | `GOFR_DIG_DATA_DIR` | Data storage root | `./data` |
 | `GOFR_DIG_JWT_SECRET` | JWT signing secret | None (auth disabled) |
-| `GOFR_DIG_TOKEN_STORE` | Token store path | `{data_dir}/auth/tokens.json` |
+| `GOFR_DIG_VAULT_URL` | Vault URL | None |
+| `GOFR_DIG_VAULT_TOKEN` | Vault token (dev/test) | None |
+| `GOFR_DIG_VAULT_ROLE_ID` | Vault AppRole role id | None |
+| `GOFR_DIG_VAULT_SECRET_ID` | Vault AppRole secret id | None |
 | `GOFR_DIG_LOG_LEVEL` | Log verbosity | `INFO` |
 | `GOFR_DIG_WEB_URL` | Public web server URL (for session URLs) | Auto-detected |
 | `GOFR_DIG_MCP_PORT` | MCP server port | `8070` |

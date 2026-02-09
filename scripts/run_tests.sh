@@ -79,8 +79,7 @@ fi
 
 # Test configuration
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
-export GOFR_DIG_TOKEN_STORE="${LOG_DIR}/${PROJECT_NAME}_tokens_test.json"
-export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-memory}"
+export GOFR_DIG_AUTH_BACKEND="vault"
 # Also export _TEST vars so integration tests pick them up directly
 export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:-8170}"
 export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
@@ -96,6 +95,15 @@ export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST:-8172}"
 # Ensure directories exist
 mkdir -p "${LOG_DIR}"
 mkdir -p "${GOFR_DIG_STORAGE:-${PROJECT_ROOT}/data/storage}"
+
+# Vault test configuration
+VAULT_CONTAINER_NAME="gofr-vault-test"
+VAULT_IMAGE="hashicorp/vault:1.15.4"
+VAULT_INTERNAL_PORT=8200
+VAULT_TEST_PORT="${GOFR_VAULT_PORT_TEST:-8301}"
+VAULT_TEST_TOKEN="${GOFR_TEST_VAULT_DEV_TOKEN:-gofr-dev-root-token}"
+TEST_NETWORK="${GOFR_TEST_NETWORK:-gofr-test-net}"
+DEV_CONTAINER_NAMES=("gofr-dig-dev")
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -137,9 +145,111 @@ stop_services() {
 cleanup_environment() {
     echo -e "${YELLOW}Cleaning up test environment...${NC}"
     stop_services
-    # Empty token store
-    echo "{}" > "${GOFR_DIG_TOKEN_STORE}" 2>/dev/null || true
+    stop_vault_test_container
     echo -e "${GREEN}Cleanup complete${NC}"
+}
+
+start_vault_test_container() {
+    echo -e "${BLUE}Starting Vault in ephemeral dev mode...${NC}"
+
+    is_running_in_docker() {
+        [ -f "/.dockerenv" ] && return 0
+        grep -qa "docker\|containerd" /proc/1/cgroup 2>/dev/null && return 0
+        return 1
+    }
+
+    if ! docker network ls --format '{{.Name}}' | grep -q "^${TEST_NETWORK}$"; then
+        echo "Creating test network: ${TEST_NETWORK}"
+        docker network create "${TEST_NETWORK}"
+    fi
+
+    for dev_name in "${DEV_CONTAINER_NAMES[@]}"; do
+        if docker ps --format '{{.Names}}' | grep -q "^${dev_name}$"; then
+            if ! docker network inspect "${TEST_NETWORK}" --format '{{range .Containers}}{{.Name}} {{end}}' | grep -q "${dev_name}"; then
+                echo "Connecting ${dev_name} to ${TEST_NETWORK}..."
+                docker network connect "${TEST_NETWORK}" "${dev_name}" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    if ! docker images "${VAULT_IMAGE}" --format '{{.Repository}}' | grep -q "vault"; then
+        echo -e "${YELLOW}Pulling Vault image: ${VAULT_IMAGE}${NC}"
+        docker pull "${VAULT_IMAGE}"
+    fi
+
+    if docker ps -aq -f name="^${VAULT_CONTAINER_NAME}$" | grep -q .; then
+        echo "Removing existing Vault test container..."
+        docker rm -f "${VAULT_CONTAINER_NAME}" 2>/dev/null || true
+    fi
+
+    echo "Starting ${VAULT_CONTAINER_NAME} (dev mode, port ${VAULT_TEST_PORT}->${VAULT_INTERNAL_PORT})..."
+    docker run -d \
+        --name "${VAULT_CONTAINER_NAME}" \
+        --hostname "${VAULT_CONTAINER_NAME}" \
+        --network "${TEST_NETWORK}" \
+        --cap-add IPC_LOCK \
+        -p "${VAULT_TEST_PORT}:${VAULT_INTERNAL_PORT}" \
+        -e "VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TEST_TOKEN}" \
+        -e "VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:${VAULT_INTERNAL_PORT}" \
+        -e "VAULT_LOG_LEVEL=warn" \
+        "${VAULT_IMAGE}" \
+        server -dev > /dev/null
+
+    echo -n "Waiting for Vault to be ready"
+    local retries=0
+    local max_retries=30
+    while [ $retries -lt $max_retries ]; do
+        if docker exec -e VAULT_ADDR="http://127.0.0.1:${VAULT_INTERNAL_PORT}" \
+            "${VAULT_CONTAINER_NAME}" vault status > /dev/null 2>&1; then
+            echo " ready!"
+            break
+        fi
+        echo -n "."
+        sleep 1
+        retries=$((retries + 1))
+    done
+    if [ $retries -eq $max_retries ]; then
+        echo ""
+        echo -e "${RED}Vault failed to start within ${max_retries}s${NC}"
+        docker logs "${VAULT_CONTAINER_NAME}" 2>&1 | tail -20
+        return 1
+    fi
+
+    docker exec -e VAULT_ADDR="http://127.0.0.1:${VAULT_INTERNAL_PORT}" \
+        -e VAULT_TOKEN="${VAULT_TEST_TOKEN}" \
+        "${VAULT_CONTAINER_NAME}" \
+        vault secrets enable -path=secret -version=2 kv 2>/dev/null || true
+
+    if is_running_in_docker; then
+        export GOFR_DIG_VAULT_URL="http://${VAULT_CONTAINER_NAME}:${VAULT_INTERNAL_PORT}"
+    else
+        export GOFR_DIG_VAULT_URL="http://localhost:${VAULT_TEST_PORT}"
+    fi
+    export GOFR_DIG_VAULT_TOKEN="${VAULT_TEST_TOKEN}"
+
+    echo -e "${GREEN}Vault started successfully${NC}"
+    echo "  Container: ${VAULT_CONTAINER_NAME}"
+    echo "  Network:   ${TEST_NETWORK}"
+    echo "  URL:       ${GOFR_DIG_VAULT_URL}"
+    echo "  Token:     ${GOFR_DIG_VAULT_TOKEN}"
+    echo ""
+}
+
+stop_vault_test_container() {
+    echo -e "${YELLOW}Stopping Vault test container...${NC}"
+    if docker ps -q -f name="^${VAULT_CONTAINER_NAME}$" | grep -q .; then
+        docker stop ${VAULT_CONTAINER_NAME} 2>/dev/null || true
+        docker rm ${VAULT_CONTAINER_NAME} 2>/dev/null || true
+        echo -e "${GREEN}Vault container stopped${NC}"
+    else
+        echo "Vault container was not running"
+    fi
+
+    for dev_name in "${DEV_CONTAINER_NAMES[@]}"; do
+        if docker ps --format '{{.Names}}' | grep -q "^${dev_name}$"; then
+            docker network disconnect "${TEST_NETWORK}" "${dev_name}" 2>/dev/null || true
+        fi
+    done
 }
 
 # =============================================================================
@@ -292,10 +402,9 @@ if [ "$CLEANUP_ONLY" = true ]; then
     exit 0
 fi
 
-# Initialize token store
-if [ ! -f "${GOFR_DIG_TOKEN_STORE}" ]; then
-    echo "{}" > "${GOFR_DIG_TOKEN_STORE}"
-fi
+# Start Vault for tests
+start_vault_test_container
+trap 'stop_vault_test_container' EXIT
 
 # Start Docker services if needed
 if [ "$START_SERVERS" = true ]; then
@@ -354,10 +463,6 @@ if [ "$START_SERVERS" = true ]; then
     echo ""
     stop_services
 fi
-
-# Clean up token store
-echo -e "${YELLOW}Cleaning up token store...${NC}"
-echo "{}" > "${GOFR_DIG_TOKEN_STORE}" 2>/dev/null || true
 
 # =============================================================================
 # RESULTS

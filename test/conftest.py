@@ -13,8 +13,10 @@ import pytest
 # Add project root to sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from uuid import uuid4
+
 from gofr_common.auth import AuthService, GroupRegistry
-from gofr_common.auth.backends import MemoryTokenStore, MemoryGroupStore
+from gofr_common.auth.backends import VaultClient, VaultConfig, VaultGroupStore, VaultTokenStore
 from app.config import Config
 
 
@@ -29,14 +31,15 @@ TEST_JWT_SECRET = "test-secret-key-for-secure-testing-do-not-use-in-production"
 TEST_GROUP = "test_group"
 
 
-def _create_test_auth_service() -> AuthService:
-    """Create an AuthService with in-memory stores for testing.
+def _create_test_auth_service(vault_client: VaultClient, path_prefix: str) -> AuthService:
+    """Create an AuthService backed by Vault for testing.
 
+    Uses a unique path prefix per test instance to isolate data.
     Automatically bootstraps reserved groups (public, admin) and creates
     the test_group used across the test suite.
     """
-    token_store = MemoryTokenStore()
-    group_store = MemoryGroupStore()
+    token_store = VaultTokenStore(vault_client, path_prefix=path_prefix)
+    group_store = VaultGroupStore(vault_client, path_prefix=path_prefix)
     group_registry = GroupRegistry(store=group_store)  # auto-bootstraps public, admin
     group_registry.create_group(TEST_GROUP, "Test group for test suite")
 
@@ -46,6 +49,21 @@ def _create_test_auth_service() -> AuthService:
         secret_key=TEST_JWT_SECRET,
         env_prefix="GOFR_DIG",
     )
+
+
+def _build_vault_client() -> VaultClient:
+    """Create a VaultClient for tests using GOFR_DIG_VAULT_* env vars."""
+    vault_url = os.environ.get("GOFR_DIG_VAULT_URL")
+    vault_token = os.environ.get("GOFR_DIG_VAULT_TOKEN")
+
+    if not vault_url or not vault_token:
+        raise RuntimeError(
+            "Vault test configuration missing. Set GOFR_DIG_VAULT_URL and "
+            "GOFR_DIG_VAULT_TOKEN (run tests via ./scripts/run_tests.sh)."
+        )
+
+    config = VaultConfig(url=vault_url, token=vault_token)
+    return VaultClient(config)
 
 
 @pytest.fixture(scope="function", autouse=True)
@@ -103,15 +121,17 @@ def temp_auth_dir(tmp_path):
 @pytest.fixture(scope="session")
 def test_auth_service():
     """
-    Create an AuthService instance for testing with in-memory stores.
+    Create an AuthService instance for testing with Vault stores.
 
-    Uses MemoryTokenStore and MemoryGroupStore for isolation.
+    Uses VaultTokenStore and VaultGroupStore for isolation.
     Automatically creates reserved groups (public, admin) and TEST_GROUP.
 
     Returns:
-        AuthService: Configured auth service with in-memory stores
+        AuthService: Configured auth service with Vault stores
     """
-    return _create_test_auth_service()
+    vault_client = _build_vault_client()
+    path_prefix = f"gofr/tests/{uuid4()}"
+    return _create_test_auth_service(vault_client, path_prefix)
 
 
 @pytest.fixture(scope="function")
@@ -150,15 +170,17 @@ def test_jwt_token(test_auth_service):
 @pytest.fixture(scope="function")
 def auth_service():
     """
-    Create an isolated AuthService with in-memory stores for each test.
+    Create an isolated AuthService with Vault stores for each test.
 
     This is the standard fixture name used across most test files.
     Each test gets a fresh AuthService with no shared state.
 
     Returns:
-        AuthService: Configured with TEST_JWT_SECRET and in-memory stores
+        AuthService: Configured with TEST_JWT_SECRET and Vault stores
     """
-    return _create_test_auth_service()
+    vault_client = _build_vault_client()
+    path_prefix = f"gofr/tests/{uuid4()}"
+    return _create_test_auth_service(vault_client, path_prefix)
 
 
 @pytest.fixture(scope="function")
@@ -186,17 +208,23 @@ def configure_test_auth_environment():
     """
     Configure environment variables for test server authentication.
 
-    This ensures test MCP/web servers use the same JWT secret and in-memory
-    backend as the test fixtures. Auto-runs before all tests.
+    This ensures test MCP/web servers use the same JWT secret and Vault backend
+    as the test fixtures. Auto-runs before all tests.
     """
     os.environ["GOFR_DIG_JWT_SECRET"] = TEST_JWT_SECRET
-    os.environ["GOFR_DIG_AUTH_BACKEND"] = "memory"
+    os.environ["GOFR_DIG_AUTH_BACKEND"] = "vault"
+
+    # Default to local test vault if not already set
+    os.environ.setdefault("GOFR_DIG_VAULT_URL", "http://localhost:8301")
+    os.environ.setdefault("GOFR_DIG_VAULT_TOKEN", "gofr-dev-root-token")
 
     yield
 
     # Cleanup
     os.environ.pop("GOFR_DIG_JWT_SECRET", None)
     os.environ.pop("GOFR_DIG_AUTH_BACKEND", None)
+    os.environ.pop("GOFR_DIG_VAULT_URL", None)
+    os.environ.pop("GOFR_DIG_VAULT_TOKEN", None)
 
 
 # ============================================================================

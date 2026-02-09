@@ -38,11 +38,12 @@ sessions = manager.list_sessions()  # or list_sessions(group="grp")
 
 ## Auth (must use gofr_common)
 ```python
-from gofr_common.auth import AuthService
-from gofr_common.auth.config import resolve_auth_config
+from gofr_common.auth import AuthService, GroupRegistry
+from gofr_common.auth.backends import create_stores_from_env
 
-jwt_secret, token_store, require_auth = resolve_auth_config(env_prefix="GOFR_DIG", logger=logger)
-auth = AuthService(secret_key=jwt_secret, token_store_path=str(token_store))
+token_store, group_store = create_stores_from_env("GOFR_DIG")
+groups = GroupRegistry(store=group_store)
+auth = AuthService(token_store=token_store, group_registry=groups)
 ```
 
 ## Scraping Basics

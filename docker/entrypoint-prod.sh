@@ -6,7 +6,6 @@
 #
 # Environment variables (all prefixed with GOFR_DIG_ to match Python code):
 #   GOFR_DIG_JWT_SECRET   - JWT signing secret
-#   GOFR_DIG_TOKEN_STORE  - Path to token store file
 #   GOFR_DIG_MCP_PORT     - MCP server port (default: 8070)
 #   GOFR_DIG_MCPO_PORT    - MCPO proxy port (default: 8071)
 #   GOFR_DIG_WEB_PORT     - Web server port (default: 8072)
@@ -20,13 +19,11 @@ set -e
 # These names MUST match what the Python code reads via
 # resolve_auth_config(env_prefix="GOFR_DIG") and os.environ.get("GOFR_DIG_*")
 export GOFR_DIG_JWT_SECRET="${GOFR_DIG_JWT_SECRET:-}"
-export GOFR_DIG_TOKEN_STORE="${GOFR_DIG_TOKEN_STORE:-/home/gofr-dig/data/auth/tokens.json}"
 export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:-8070}"
 export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT:-8071}"
 export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:-8072}"
 export GOFR_DIG_DATA_DIR="${GOFR_DIG_DATA_DIR:-/home/gofr-dig/data}"
 export GOFR_DIG_STORAGE_DIR="${GOFR_DIG_STORAGE_DIR:-/home/gofr-dig/data/storage}"
-export GOFR_DIG_AUTH_DIR="${GOFR_DIG_AUTH_DIR:-/home/gofr-dig/data/auth}"
 export GOFR_DIG_NO_AUTH="${GOFR_DIG_NO_AUTH:-}"
 
 # Neo4j connection (optional)
@@ -53,7 +50,7 @@ echo "Data Dir:  ${GOFR_DIG_DATA_DIR}"
 echo "Auth:      $([ -n "${AUTH_FLAG}" ] && echo 'DISABLED' || echo 'JWT enabled')"
 
 # --- Ensure data directories exist -------------------------------------------
-mkdir -p "${GOFR_DIG_DATA_DIR}" "${GOFR_DIG_STORAGE_DIR}" "${GOFR_DIG_AUTH_DIR}"
+mkdir -p "${GOFR_DIG_DATA_DIR}" "${GOFR_DIG_STORAGE_DIR}"
 chown -R gofr-dig:gofr-dig /home/gofr-dig/data
 
 # --- Shared supervisor environment ------------------------------------------
@@ -61,13 +58,11 @@ chown -R gofr-dig:gofr-dig /home/gofr-dig/data
 # supervisor uses %(ENV_VARNAME)s to reference the container environment.
 SHARED_ENV="PATH=\"${VENV_PATH}/bin:%(ENV_PATH)s\",VIRTUAL_ENV=\"${VENV_PATH}\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_JWT_SECRET=\"%(ENV_GOFR_DIG_JWT_SECRET)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_TOKEN_STORE=\"%(ENV_GOFR_DIG_TOKEN_STORE)s\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_MCP_PORT=\"%(ENV_GOFR_DIG_MCP_PORT)s\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_MCPO_PORT=\"%(ENV_GOFR_DIG_MCPO_PORT)s\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_WEB_PORT=\"%(ENV_GOFR_DIG_WEB_PORT)s\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_DATA_DIR=\"%(ENV_GOFR_DIG_DATA_DIR)s\""
 SHARED_ENV="${SHARED_ENV},GOFR_DIG_STORAGE_DIR=\"%(ENV_GOFR_DIG_STORAGE_DIR)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_AUTH_DIR=\"%(ENV_GOFR_DIG_AUTH_DIR)s\""
 SHARED_ENV="${SHARED_ENV},NEO4J_URI=\"%(ENV_NEO4J_URI)s\""
 SHARED_ENV="${SHARED_ENV},NEO4J_USER=\"%(ENV_NEO4J_USER)s\""
 SHARED_ENV="${SHARED_ENV},NEO4J_PASSWORD=\"%(ENV_NEO4J_PASSWORD)s\""

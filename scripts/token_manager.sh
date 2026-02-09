@@ -39,13 +39,6 @@ done
 # Re-source gofr-dig.env with potentially updated GOFR_DIG_ENV
 source "$SCRIPT_DIR/gofr-dig.env"
 
-# Map project-specific vars to common vars
-export GOFR_PROJECT_NAME="gofr-dig"
-export GOFR_PROJECT_ROOT="$GOFR_DIG_ROOT"
-export GOFR_TOKEN_STORE="$GOFR_DIG_TOKEN_STORE"
-export GOFR_ENV="$GOFR_DIG_ENV"
-export GOFR_ENV_VAR_PREFIX="GOFR_DIG"
-export GOFR_TOKEN_MODULE="gofr_common.auth.token_manager"
-
-# Call shared script
-source "$COMMON_SCRIPTS/token_manager.sh" "$@"
+echo "ERROR: token_manager.sh is deprecated. Use lib/gofr-common/scripts/auth_manager.sh instead." >&2
+echo "Example: lib/gofr-common/scripts/auth_manager.sh --docker tokens list" >&2
+exit 1

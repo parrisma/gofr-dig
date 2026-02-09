@@ -20,12 +20,10 @@
 
 ### 1.2 Local auth-config helper — [app/startup/auth_config.py](app/startup/auth_config.py)
 - Provides a project-specific `resolve_auth_config()`.
-- Signature: `(jwt_secret_arg, token_store_arg, require_auth, logger) → Tuple[Optional[str], Optional[str]]`.
+- Signature: `(jwt_secret_arg, require_auth, logger) → Tuple[Optional[str], bool]`.
 - `gofr_common.auth.config.resolve_auth_config()` has a **different, richer
-  signature**: `(env_prefix, jwt_secret_arg, token_store_arg, require_auth,
-  allow_auto_secret, exit_on_missing, logger) → Tuple[Optional[str],
-  Optional[Path], bool]` — returns a `Path` (not `str`) and adds a third
-  element (`require_auth` echo-back).
+  signature**: `(env_prefix, jwt_secret_arg, require_auth,
+  allow_auto_secret, exit_on_missing, logger) → Tuple[Optional[str], bool]`.
 - Both `main_mcp.py` (L8, L84) and `main_web.py` (L12, L58) import and call
   the **local** version.
 
@@ -68,14 +66,13 @@ Verified `gofr_common.auth` imports successfully in the project venv:
 **Changes made:**
 1. [app/main_mcp.py](app/main_mcp.py):
    - Import: `from gofr_common.auth.config import resolve_auth_config`
-   - Updated call to unpack 3-tuple: `jwt_secret, token_store_path, require_auth = resolve_auth_config(env_prefix="GOFR_DIG", ...)`
-   - Added `Path` → `str` conversion for compatibility
+  - Updated call to unpack 2-tuple: `jwt_secret, require_auth = resolve_auth_config(env_prefix="GOFR_DIG", ...)`
 
 2. [app/main_web.py](app/main_web.py):
    - Same changes as main_mcp.py
 
 3. [app/startup/auth_config.py](app/startup/auth_config.py):
-   - ⚠️ File will be deleted in Step 6 (no longer needed)
+  - ⚠️ File will be deleted in Step 6 (no longer needed)
 
 ### ✅ Step 3 — Switch `from app.auth` imports to `from gofr_common.auth`
 **Status:** COMPLETED
@@ -159,15 +156,14 @@ Choose **one** of:
 
 | Option | Pros | Cons |
 |--------|------|------|
-| **A — Adopt the common version directly** | Single source of truth; richer features (`exit_on_missing`, `allow_auto_secret`) | Callers must handle `Path` instead of `str` and unpack a 3-tuple |
+| **A — Adopt the common version directly** | Single source of truth; richer features (`exit_on_missing`, `allow_auto_secret`) | Callers must unpack a 2-tuple |
 | **B — Keep the local wrapper as a thin adapter** | Zero change to callers; low risk | Still have a local file to maintain |
 
 **Recommended: Option A.** In each caller (`main_mcp.py`, `main_web.py`):
 1. Replace `from app.startup.auth_config import resolve_auth_config` with
    `from gofr_common.auth.config import resolve_auth_config`.
 2. Update the call site to pass `env_prefix="GOFR_DIG"` and unpack the
-   3-tuple `(jwt_secret, token_store_path, require_auth)`.
-3. Cast `token_store_path` to `str` if downstream code expects a string.
+  2-tuple `(jwt_secret, require_auth)`.
 
 ### Step 3 — Switch `from app.auth` imports to `from gofr_common.auth`
 In each file listed in §1.4, replace the import. Example diff:

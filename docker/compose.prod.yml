@@ -63,9 +63,8 @@ services:
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth — passed through from host environment or start-prod.sh
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
-      - GOFR_DIG_TOKEN_STORE=${GOFR_DIG_TOKEN_STORE:-/home/gofr-dig/data/auth/tokens.json}
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
-      # Auth backend (vault, file, or memory)
+      # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
@@ -146,9 +145,8 @@ services:
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth — same as MCP
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
-      - GOFR_DIG_TOKEN_STORE=${GOFR_DIG_TOKEN_STORE:-/home/gofr-dig/data/auth/tokens.json}
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
-      # Auth backend (vault, file, or memory)
+      # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}

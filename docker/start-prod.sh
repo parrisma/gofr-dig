@@ -24,9 +24,8 @@
 #                         Falls back to env var. Generate: openssl rand -hex 32
 #
 # Optional environment:
-#   GOFR_DIG_AUTH_BACKEND Auth backend: vault (default), file, memory
+#   GOFR_DIG_AUTH_BACKEND Auth backend: vault (default)
 #   GOFR_DIG_LOG_LEVEL    Log level (default: INFO)
-#   GOFR_DIG_TOKEN_STORE  Token store path inside container (file backend only)
 #   NEO4J_URI             Neo4j bolt URI     (default: bolt://gofr-neo4j:7687)
 #   NEO4J_USER            Neo4j user         (default: neo4j)
 #   NEO4J_PASSWORD        Neo4j password
@@ -138,7 +137,7 @@ fi
 if [ "$NO_AUTH" = true ]; then
     warn "Running WITHOUT authentication (--no-auth). Not suitable for production!"
     export GOFR_DIG_NO_AUTH=1
-    export GOFR_DIG_AUTH_BACKEND=memory
+    export GOFR_DIG_AUTH_BACKEND=vault
 else
     # Try to load JWT secret from Vault if not already set
     if [ -z "${GOFR_DIG_JWT_SECRET:-}" ]; then

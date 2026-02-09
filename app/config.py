@@ -50,11 +50,6 @@ def get_default_storage_dir() -> str:
     return str(Config.get_storage_dir())
 
 
-def get_default_token_store_path() -> str:
-    """Get default token store path as string"""
-    return str(Config.get_token_store_path())
-
-
 def get_default_sessions_dir() -> str:
     """Get default sessions directory as string"""
     return str(Config.get_sessions_dir())
@@ -76,7 +71,6 @@ __all__ = [
     "reset_settings",
     "get_public_storage_dir",
     "get_default_storage_dir",
-    "get_default_token_store_path",
     "get_default_sessions_dir",
     "get_default_proxy_dir",
 ]

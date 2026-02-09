@@ -40,12 +40,6 @@ if __name__ == "__main__":
         help="JWT secret key (default: from GOFR_DIG_JWT_SECRET env var or auto-generated)",
     )
     parser.add_argument(
-        "--token-store",
-        type=str,
-        default=None,
-        help="Path to token store file (default: configured in app.config)",
-    )
-    parser.add_argument(
         "--no-auth",
         action="store_true",
         help="Disable authentication (WARNING: insecure, for development only)",
@@ -81,10 +75,9 @@ if __name__ == "__main__":
     startup_logger: Logger = session_logger
 
     # Resolve authentication configuration
-    jwt_secret, _token_store_path, require_auth = resolve_auth_config(
+    jwt_secret, _require_auth = resolve_auth_config(
         env_prefix="GOFR_DIG",
         jwt_secret_arg=args.jwt_secret,
-        token_store_arg=args.token_store,
         require_auth=not args.no_auth,
         logger=startup_logger,
     )
