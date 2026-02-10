@@ -40,14 +40,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--mcp-port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_MCP_PORT", "8070")),
-        help="Port where MCP server is listening (default: 8070)",
+        default=int(os.environ["GOFR_DIG_MCP_PORT"]),
+        help="Port where MCP server is listening (from GOFR_DIG_MCP_PORT env var)",
     )
     parser.add_argument(
         "--mcpo-port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_MCPO_PORT", "8071")),
-        help="Port for MCPO proxy to listen on (default: 8071)",
+        default=int(os.environ["GOFR_DIG_MCPO_PORT"]),
+        help="Port for MCPO proxy to listen on (from GOFR_DIG_MCPO_PORT env var)",
     )
     parser.add_argument(
         "--mcpo-host",

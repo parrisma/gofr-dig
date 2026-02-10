@@ -20,10 +20,24 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Secrets directory — inside the dev container this is the gofr-secrets Docker
+# volume (mounted at $PROJECT_ROOT/secrets by run-dev.sh).  On the host it may
+# not exist yet, so we fall back to lib/gofr-common/secrets/ where
+# manage_vault.sh bootstrap writes the initial credentials.
+# Source port config (single source of truth)
+_PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
+if [ -f "$_PORTS_ENV" ]; then
+    # shellcheck source=/dev/null
+    source "$_PORTS_ENV"
+fi
+unset _PORTS_ENV
+
 SECRETS_DIR="$PROJECT_ROOT/secrets"
+FALLBACK_SECRETS_DIR="$PROJECT_ROOT/lib/gofr-common/secrets"
 CREDS_FILE="$SECRETS_DIR/service_creds/gofr-dig.json"
-ROOT_TOKEN_FILE="$SECRETS_DIR/vault_root_token"
+FALLBACK_CREDS_FILE="$FALLBACK_SECRETS_DIR/service_creds/gofr-dig.json"
 VAULT_CONTAINER="gofr-vault"
+VAULT_PORT="${GOFR_VAULT_PORT:?GOFR_VAULT_PORT not set — source gofr_ports.env}"
 
 CHECK_ONLY=false
 [ "${1:-}" = "--check" ] && CHECK_ONLY=true
@@ -37,6 +51,9 @@ err()   { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; }
 # ---- Already provisioned? ---------------------------------------------------
 if [ -f "$CREDS_FILE" ]; then
     ok "AppRole credentials exist: $CREDS_FILE"
+    exit 0
+elif [ -f "$FALLBACK_CREDS_FILE" ]; then
+    ok "AppRole credentials exist: $FALLBACK_CREDS_FILE"
     exit 0
 fi
 
@@ -67,8 +84,18 @@ fi
 ok "Vault is running and unsealed"
 
 # ---- Root token available? --------------------------------------------------
-if [ ! -f "$ROOT_TOKEN_FILE" ]; then
-    err "Vault root token not found at $ROOT_TOKEN_FILE"
+# Try primary path first ($PROJECT_ROOT/secrets), then fallback to gofr-common
+ROOT_TOKEN_FILE=""
+if [ -f "$SECRETS_DIR/vault_root_token" ]; then
+    ROOT_TOKEN_FILE="$SECRETS_DIR/vault_root_token"
+elif [ -f "$FALLBACK_SECRETS_DIR/vault_root_token" ]; then
+    ROOT_TOKEN_FILE="$FALLBACK_SECRETS_DIR/vault_root_token"
+fi
+
+if [ -z "$ROOT_TOKEN_FILE" ]; then
+    err "Vault root token not found at:"
+    err "  $SECRETS_DIR/vault_root_token"
+    err "  $FALLBACK_SECRETS_DIR/vault_root_token"
     err "  Bootstrap Vault first: ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
     exit 1
 fi
@@ -84,7 +111,7 @@ ok "Root token found"
 # ---- Provision AppRole ------------------------------------------------------
 info "Provisioning gofr-dig AppRole..."
 
-export GOFR_VAULT_URL="http://${VAULT_CONTAINER}:8201"
+export GOFR_VAULT_URL="http://${VAULT_CONTAINER}:${VAULT_PORT}"
 export GOFR_VAULT_TOKEN="$VAULT_ROOT_TOKEN"
 
 cd "$PROJECT_ROOT"
@@ -98,6 +125,9 @@ fi
 # ---- Verify -----------------------------------------------------------------
 if [ -f "$CREDS_FILE" ]; then
     ok "AppRole credentials provisioned: $CREDS_FILE"
+    exit 0
+elif [ -f "$FALLBACK_CREDS_FILE" ]; then
+    ok "AppRole credentials provisioned: $FALLBACK_CREDS_FILE"
     exit 0
 else
     err "setup_approle.py ran but credentials file not created"

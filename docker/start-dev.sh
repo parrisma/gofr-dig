@@ -15,7 +15,7 @@
 # Usage:
 #   ./start-dev.sh                     # Start (auto-builds if image missing)
 #   ./start-dev.sh --build             # Force rebuild before starting
-#   ./start-dev.sh --port-offset 100   # Shift host ports by N (e.g., 8070→8170)
+#   ./start-dev.sh --port-offset 100   # Shift host ports by N
 #   ./start-dev.sh --down              # Stop and remove all dev services
 #
 # Notes:

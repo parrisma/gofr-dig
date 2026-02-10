@@ -9,18 +9,25 @@ Covers:
 """
 
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 from starlette.testclient import TestClient
 
 from gofr_common.storage.exceptions import PermissionDeniedError
 
 from app.web_server.web_server import GofrDigWebServer
 from app.session.manager import SessionManager
-from conftest import _create_test_auth_service
+from conftest import _create_test_auth_service, _build_vault_client
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _make_auth_service():
+    """Create an isolated test AuthService with a unique Vault path prefix."""
+    vault_client = _build_vault_client()
+    path_prefix = f"gofr/tests/{uuid4()}"
+    return _create_test_auth_service(vault_client, path_prefix)
 
 def _make_session_manager_mock(group: str | None = "team-a") -> MagicMock:
     mgr = MagicMock(spec=SessionManager)
@@ -40,7 +47,7 @@ def _make_session_manager_mock(group: str | None = "team-a") -> MagicMock:
 
 
 def _create_token(groups: list[str], auth_service=None) -> str:
-    svc = auth_service or _create_test_auth_service()
+    svc = auth_service or _make_auth_service()
     for g in groups:
         try:
             svc.groups.create_group(g, f"Test group {g}")
@@ -79,7 +86,7 @@ class TestWebSessionAuth:
 
     def test_valid_bearer_passes_group(self):
         """Valid Bearer token → group extracted and passed."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-a"], svc)
         mgr = _make_session_manager_mock(group="team-a")
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
@@ -93,7 +100,7 @@ class TestWebSessionAuth:
 
     def test_wrong_group_returns_403(self):
         """Token group ≠ session group → 403."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock(group="team-a")
         mgr.get_session_info.side_effect = PermissionDeniedError("Access denied")
@@ -109,7 +116,7 @@ class TestWebSessionAuth:
 
     def test_invalid_token_returns_401(self):
         """Bad Bearer token → 401."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         mgr = _make_session_manager_mock()
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
 
@@ -123,7 +130,7 @@ class TestWebSessionAuth:
 
     def test_chunk_with_valid_auth(self):
         """get_session_chunk passes group from header."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-c"], svc)
         mgr = _make_session_manager_mock(group="team-c")
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
@@ -137,7 +144,7 @@ class TestWebSessionAuth:
 
     def test_chunk_permission_denied(self):
         """get_session_chunk with wrong group → 403."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock()
         mgr.get_chunk.side_effect = PermissionDeniedError("Access denied")
@@ -153,7 +160,7 @@ class TestWebSessionAuth:
 
     def test_urls_with_valid_auth(self):
         """get_session_urls passes group from header."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-e"], svc)
         mgr = _make_session_manager_mock(group="team-e")
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
@@ -167,7 +174,7 @@ class TestWebSessionAuth:
 
     def test_urls_permission_denied(self):
         """get_session_urls with wrong group → 403."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock()
         mgr.get_session_info.side_effect = PermissionDeniedError("Access denied")
@@ -195,7 +202,7 @@ class TestWebSessionAuth:
 
     def test_chunk_invalid_token_returns_401(self):
         """get_session_chunk with bad token → 401."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         mgr = _make_session_manager_mock()
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
 
@@ -207,7 +214,7 @@ class TestWebSessionAuth:
 
     def test_urls_invalid_token_returns_401(self):
         """get_session_urls with bad token → 401."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         mgr = _make_session_manager_mock()
         client = _make_client(auth_service=svc, session_manager_mock=mgr)
 

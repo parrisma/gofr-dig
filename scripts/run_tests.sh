@@ -6,7 +6,7 @@
 #
 # Integration tests require running MCP/Web/MCPO services. This script uses
 # docker/start-dev.sh to launch ephemeral Docker services on test ports
-# (prod + 100: MCP=8170, MCPO=8171, Web=8172) via compose.dev.yml.
+# (test ports from gofr_ports.env: MCP/MCPO/Web) via compose.dev.yml.
 #
 # Usage:
 #   ./scripts/run_tests.sh                          # Run all tests (with servers)
@@ -80,17 +80,17 @@ fi
 # Test configuration
 export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_AUTH_BACKEND="vault"
-# Also export _TEST vars so integration tests pick them up directly
-export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:-8170}"
-export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
-export GOFR_DIG_WEB_PORT_TEST="${GOFR_DIG_WEB_PORT_TEST:-8172}"
+# Test ports come from gofr_ports.env (sourced above) — no hardcoded fallbacks
+export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:?GOFR_DIG_MCP_PORT_TEST not set — source gofr_ports.env}"
+export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:?GOFR_DIG_MCPO_PORT_TEST not set — source gofr_ports.env}"
+export GOFR_DIG_WEB_PORT_TEST="${GOFR_DIG_WEB_PORT_TEST:?GOFR_DIG_WEB_PORT_TEST not set — source gofr_ports.env}"
 
 # Docker vs localhost addressing — set after argument parsing (see apply_docker_mode below)
 # Defaults are overridden by --docker / --no-docker flags
 export GOFR_DIG_HOST="${GOFR_DIG_HOST:-localhost}"
-export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST:-8170}"
-export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST:-8171}"
-export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST:-8172}"
+export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT_TEST}"
+export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT_TEST}"
+export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT_TEST}"
 
 # Ensure directories exist
 mkdir -p "${LOG_DIR}"
@@ -100,10 +100,13 @@ mkdir -p "${GOFR_DIG_STORAGE:-${PROJECT_ROOT}/data/storage}"
 VAULT_CONTAINER_NAME="gofr-vault-test"
 VAULT_IMAGE="hashicorp/vault:1.15.4"
 VAULT_INTERNAL_PORT=8200
-VAULT_TEST_PORT="${GOFR_VAULT_PORT_TEST:-8301}"
+VAULT_TEST_PORT="${GOFR_VAULT_PORT_TEST:?GOFR_VAULT_PORT_TEST not set — source gofr_ports.env}"
 VAULT_TEST_TOKEN="${GOFR_TEST_VAULT_DEV_TOKEN:-gofr-dev-root-token}"
 TEST_NETWORK="${GOFR_TEST_NETWORK:-gofr-test-net}"
 DEV_CONTAINER_NAMES=("gofr-dig-dev")
+
+# Test-only secrets volume (isolated from production secrets)
+SECRETS_TEST_VOLUME="gofr-secrets-test"
 
 # =============================================================================
 # HELPER FUNCTIONS
@@ -161,6 +164,12 @@ start_vault_test_container() {
     if ! docker network ls --format '{{.Name}}' | grep -q "^${TEST_NETWORK}$"; then
         echo "Creating test network: ${TEST_NETWORK}"
         docker network create "${TEST_NETWORK}"
+    fi
+
+    # Create test-only secrets volume (isolated from production gofr-secrets)
+    if ! docker volume inspect "${SECRETS_TEST_VOLUME}" >/dev/null 2>&1; then
+        echo "Creating test secrets volume: ${SECRETS_TEST_VOLUME}"
+        docker volume create "${SECRETS_TEST_VOLUME}"
     fi
 
     for dev_name in "${DEV_CONTAINER_NAMES[@]}"; do
@@ -349,10 +358,10 @@ done
 if [ "$USE_DOCKER" = true ]; then
     # Docker mode: use container hostnames + internal (prod) ports.
     # The dev container and test containers share gofr-test-net.
-    # Containers listen on prod ports internally (8070/8071/8072).
-    _MCP_INTERNAL="${GOFR_DIG_MCP_PORT_INTERNAL:-8070}"
-    _MCPO_INTERNAL="${GOFR_DIG_MCPO_PORT_INTERNAL:-8071}"
-    _WEB_INTERNAL="${GOFR_DIG_WEB_PORT_INTERNAL:-8072}"
+    # Containers listen on prod ports internally.
+    _MCP_INTERNAL="${GOFR_DIG_MCP_PORT}"
+    _MCPO_INTERNAL="${GOFR_DIG_MCPO_PORT}"
+    _WEB_INTERNAL="${GOFR_DIG_WEB_PORT}"
 
     export GOFR_DIG_HOST="gofr-dig-mcp-test"
     export GOFR_DIG_MCP_PORT="${_MCP_INTERNAL}"

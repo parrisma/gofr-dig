@@ -16,7 +16,7 @@
 #   ./start-prod.sh                     # Start (auto-builds if image missing)
 #   ./start-prod.sh --build             # Force rebuild before starting
 #   ./start-prod.sh --no-auth           # Start without JWT authentication
-#   ./start-prod.sh --port-offset 100   # Shift host ports by N (e.g., 8070→8170)
+#   ./start-prod.sh --port-offset 100   # Shift host ports by N
 #   ./start-prod.sh --down              # Stop and remove all services
 #
 # Required environment (unless --no-auth):
@@ -146,7 +146,7 @@ else
             info "Loading JWT secret from Vault..."
             VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE")
             JWT_SECRET=$(docker exec \
-                -e VAULT_ADDR=http://127.0.0.1:8201 \
+                -e VAULT_ADDR=http://127.0.0.1:${GOFR_VAULT_PORT} \
                 -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" \
                 gofr-vault vault kv get -field=value secret/gofr/config/jwt-signing-secret 2>/dev/null) || true
 
@@ -181,9 +181,10 @@ else
     # Set Vault backend env vars for containers
     export GOFR_DIG_AUTH_BACKEND="${GOFR_DIG_AUTH_BACKEND:-vault}"
 
-    # AppRole credentials are baked into the prod image at /run/secrets/vault_creds
-    # (via Dockerfile.prod COPY from lib/gofr-common/secrets/service_creds/gofr-dig.json)
-    # Ensure they exist — auto-provision if Vault is available.
+    # AppRole credentials are provided at runtime via the gofr-secrets Docker
+    # volume mounted at /run/secrets (see compose.prod.yml).
+    # Ensure creds exist in the volume — auto-provision via ensure_approle.sh
+    # which writes to $PROJECT_ROOT/secrets/ (backed by the volume in dev container).
     ENSURE_APPROLE="$PROJECT_ROOT/scripts/ensure_approle.sh"
     if [ -x "$ENSURE_APPROLE" ]; then
         "$ENSURE_APPROLE" || {
@@ -191,12 +192,13 @@ else
             warn "Run manually: $ENSURE_APPROLE"
         }
     else
-        VAULT_CREDS_FILE="$PROJECT_ROOT/lib/gofr-common/secrets/service_creds/gofr-dig.json"
+        # Check the secrets volume (mounted at $PROJECT_ROOT/secrets in dev container)
+        VAULT_CREDS_FILE="$PROJECT_ROOT/secrets/service_creds/gofr-dig.json"
         if [ -f "$VAULT_CREDS_FILE" ]; then
-            ok "Vault AppRole credentials found (baked into image)"
+            ok "Vault AppRole credentials found in secrets volume"
         else
-            warn "No AppRole credentials and ensure_approle.sh not executable"
-            warn "Run: chmod +x scripts/ensure_approle.sh && scripts/ensure_approle.sh"
+            warn "No AppRole credentials in secrets volume"
+            warn "Run: ./scripts/migrate_secrets_to_volume.sh && scripts/ensure_approle.sh"
         fi
     fi
 fi

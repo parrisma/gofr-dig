@@ -685,7 +685,7 @@ async def handle_list_tools() -> List[Tool]:
                     "base_url": {
                         "type": "string",
                         "description": (
-                            "Override the web-server base URL (e.g. 'http://myhost:8072'). "
+                            "Override the web-server base URL (e.g. 'http://myhost:PORT'). "
                             "Auto-detected from GOFR_DIG_WEB_URL env or defaults to localhost if omitted."
                         ),
                     },
@@ -1350,7 +1350,9 @@ def _resolve_web_base_url(override: str | None = None) -> str:
     if env_url:
         return env_url.rstrip("/")
 
-    web_port = os.environ.get("GOFR_DIG_WEB_PORT", "8072")
+    web_port = os.environ.get("GOFR_DIG_WEB_PORT", "")
+    if not web_port:
+        return "http://localhost"
     return f"http://localhost:{web_port}"
 
 
@@ -1447,9 +1449,12 @@ starlette_app = create_mcp_starlette_app(
 )
 
 
-async def main(host: str = "0.0.0.0", port: int = 8070) -> None:
+async def main(host: str = "0.0.0.0", port: int = 0) -> None:
     """Run the server."""
     import uvicorn
+
+    if port == 0:
+        port = int(os.environ["GOFR_DIG_MCP_PORT"])
 
     config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)

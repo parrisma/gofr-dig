@@ -1,9 +1,13 @@
+import os
 import pytest
 import json
 from unittest.mock import MagicMock, patch
 from app.mcp_server.mcp_server import handle_call_tool, handle_list_tools
 from app.session.manager import SessionManager
 from app.scraping.fetcher import FetchResult
+
+# Base URL for get_session_urls tests — derived from env (set by gofr_ports.env).
+TEST_WEB_BASE_URL = "http://web:{}".format(os.environ.get("GOFR_DIG_WEB_PORT", os.environ.get("GOFR_DIG_WEB_PORT_TEST", "")))
 
 @pytest.fixture
 def mock_session_manager():
@@ -169,7 +173,7 @@ async def test_get_session_urls(mock_session_manager):
     with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
         result = await handle_call_tool(
             "get_session_urls",
-            {"session_id": "mock-session-id", "base_url": "http://web:8072"},
+            {"session_id": "mock-session-id", "base_url": TEST_WEB_BASE_URL},
         )
 
         response = json.loads(result[0].text)  # type: ignore
@@ -178,7 +182,7 @@ async def test_get_session_urls(mock_session_manager):
         assert response["total_chunks"] == 5
         assert len(response["chunk_urls"]) == 5
         for i, url in enumerate(response["chunk_urls"]):
-            assert url == f"http://web:8072/sessions/mock-session-id/chunks/{i}"
+            assert url == f"{TEST_WEB_BASE_URL}/sessions/mock-session-id/chunks/{i}"
 
 
 @pytest.mark.asyncio
@@ -215,7 +219,7 @@ async def test_get_session_urls_session_not_found(mock_session_manager):
     with patch("app.mcp_server.mcp_server.session_manager", mock_session_manager):
         result = await handle_call_tool(
             "get_session_urls",
-            {"session_id": "bad-id", "base_url": "http://web:8072"},
+            {"session_id": "bad-id", "base_url": TEST_WEB_BASE_URL},
         )
         response = json.loads(result[0].text)  # type: ignore
         assert response["success"] is False

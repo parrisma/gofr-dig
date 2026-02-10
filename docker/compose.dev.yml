@@ -2,8 +2,8 @@
 #
 # Port Configuration:
 #   All ports defined in lib/gofr-common/config/gofr_ports.env
-#   Test ports (prod + 100): 8170 (MCP) / 8171 (MCPO) / 8172 (Web)
-#   Containers run internally on prod ports (8070/8071/8072)
+#   Test ports (prod + 100) — see lib/gofr-common/config/gofr_ports.env
+#   Containers run internally on prod ports
 #
 # Usage:
 #   cd docker
@@ -12,9 +12,9 @@
 #   docker compose -f compose.dev.yml down          # Stop and remove
 #
 # Services (Ephemeral — no persistent volumes):
-#   - mcp:   MCP Server (Streamable HTTP)  — host port ${GOFR_DIG_MCP_PORT_TEST}  (8170)
-#   - mcpo:  MCPO Server (OpenAPI wrapper) — host port ${GOFR_DIG_MCPO_PORT_TEST} (8171)
-#   - web:   Web Server (REST API)         — host port ${GOFR_DIG_WEB_PORT_TEST}  (8172)
+#   - mcp:   MCP Server (Streamable HTTP)  — host port ${GOFR_DIG_MCP_PORT_TEST}
+#   - mcpo:  MCPO Server (OpenAPI wrapper) — host port ${GOFR_DIG_MCPO_PORT_TEST}
+#   - web:   Web Server (REST API)         — host port ${GOFR_DIG_WEB_PORT_TEST}
 
 name: gofr-dig-test
 
@@ -45,6 +45,10 @@ services:
       - |
         mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
         chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
+        # Copy service creds from shared volume to VaultIdentity's expected path
+        mkdir -p /run/secrets
+        cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
+        chown gofr-dig:gofr-dig /run/secrets/vault_creds
         exec su -s /bin/bash gofr-dig -c '/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port ${GOFR_DIG_MCP_PORT} --no-auth'
     environment:
       - GOFR_DIG_ENV=TEST
@@ -55,13 +59,14 @@ services:
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
-      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
       - "${GOFR_DIG_MCP_HOST_PORT:-${GOFR_DIG_MCP_PORT_TEST}}:${GOFR_DIG_MCP_PORT}"
     volumes:
       - sessions-data:/home/gofr-dig/data/storage/sessions
+      - gofr-secrets-test:/run/gofr-secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_MCP_PORT}/mcp || exit 1"]
       interval: 10s
@@ -106,12 +111,18 @@ services:
     <<: *gofr_dig_common
     container_name: gofr-dig-web-test
     hostname: gofr-dig-web-test
-    user: gofr-dig
+    user: root
     working_dir: /home/gofr-dig
-    entrypoint: []
-    command: >
-      /home/gofr-dig/.venv/bin/python -m app.main_web
-      --host 0.0.0.0 --port ${GOFR_DIG_WEB_PORT} --no-auth
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /home/gofr-dig/logs
+        chown -R gofr-dig:gofr-dig /home/gofr-dig/logs
+        # Copy service creds from shared volume to VaultIdentity's expected path
+        mkdir -p /run/secrets
+        cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
+        chown gofr-dig:gofr-dig /run/secrets/vault_creds
+        exec su -s /bin/bash gofr-dig -c '/home/gofr-dig/.venv/bin/python -m app.main_web --host 0.0.0.0 --port ${GOFR_DIG_WEB_PORT} --no-auth'
     environment:
       - GOFR_DIG_ENV=TEST
       - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
@@ -121,13 +132,14 @@ services:
       # Auth backend — vault only
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
-      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:8201}
+      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
       - "${GOFR_DIG_WEB_HOST_PORT:-${GOFR_DIG_WEB_PORT_TEST}}:${GOFR_DIG_WEB_PORT}"
     volumes:
       - sessions-data:/home/gofr-dig/data/storage/sessions
+      - gofr-secrets-test:/run/gofr-secrets:ro
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:${GOFR_DIG_WEB_PORT}/health || exit 1"]
       interval: 15s
@@ -150,3 +162,7 @@ networks:
 volumes:
   sessions-data:
     # Ephemeral — destroyed with 'docker compose down -v'
+  gofr-secrets-test:
+    name: gofr-secrets-test
+    external: true
+    # Test-only secrets volume — isolated from production gofr-secrets

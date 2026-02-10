@@ -8,19 +8,19 @@ from mcp.client import streamable_http
 streamable_http_client = streamable_http.streamablehttp_client
 
 # Service URLs — prefer full URL env vars (set by run_tests.sh --docker/--no-docker),
-# fall back to host+port construction for backwards compatibility.
+# fall back to host+port construction (env vars set by gofr_ports.env).
 MCP_URL = os.environ.get(
     "GOFR_DIG_MCP_URL",
     "http://{}:{}/mcp".format(
         os.environ.get("GOFR_DIG_HOST", "localhost"),
-        os.environ.get("GOFR_DIG_MCP_PORT_TEST", "8170"),
+        os.environ["GOFR_DIG_MCP_PORT_TEST"],
     ),
 )
 WEB_URL = os.environ.get(
     "GOFR_DIG_WEB_URL",
     "http://{}:{}".format(
         os.environ.get("GOFR_DIG_HOST", "localhost"),
-        os.environ.get("GOFR_DIG_WEB_PORT_TEST", "8172"),
+        os.environ["GOFR_DIG_WEB_PORT_TEST"],
     ),
 )
 

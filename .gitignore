@@ -163,8 +163,11 @@ Thumbs.db
 *.tmp
 *.bak
 
-# Secrets (symlink to lib/gofr-common/secrets)
-secrets
+# Secrets — volume mount point (gofr-secrets Docker volume)
+secrets/
+
+# Scratch / working files
+tmp/
 
 # Data storage - sessions and documents
 data/sessions/**/*.json

@@ -4,6 +4,7 @@ Handles generation of mcpo config files for multiple server configurations.
 """
 
 import json
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -72,7 +73,7 @@ class MCPOConfig:
 
 def create_default_config(
     auth_token: Optional[str] = None,
-    mcp_auth_port: int = 8070,
+    mcp_auth_port: int = int(os.environ.get("GOFR_DIG_MCP_PORT", "0")),
     mcp_public_port: int = 8015,
 ) -> MCPOConfig:
     """
@@ -104,7 +105,9 @@ def create_default_config(
     return config
 
 
-def create_public_only_config(mcp_port: int = 8070) -> MCPOConfig:
+def create_public_only_config(
+    mcp_port: int = int(os.environ.get("GOFR_DIG_MCP_PORT", "0")),
+) -> MCPOConfig:
     """
     Create MCPO configuration for public (no auth) server only
 

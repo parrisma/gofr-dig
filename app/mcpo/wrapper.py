@@ -12,6 +12,10 @@ from app.logger import Logger, session_logger
 
 logger: Logger = session_logger
 
+# Port defaults from environment (set by gofr_ports.env; 0 = not configured)
+_MCP_PORT = int(os.environ.get("GOFR_DIG_MCP_PORT", "0"))
+_MCPO_PORT = int(os.environ.get("GOFR_DIG_MCPO_PORT", "0"))
+
 
 class MCPOWrapper:
     """Wrapper for MCPO proxy server"""
@@ -19,8 +23,8 @@ class MCPOWrapper:
     def __init__(
         self,
         mcp_host: str = "localhost",
-        mcp_port: int = 8070,
-        mcpo_port: int = 8071,
+        mcp_port: int = _MCP_PORT,
+        mcpo_port: int = _MCPO_PORT,
         mcpo_host: str = "0.0.0.0",
         mcpo_api_key: Optional[str] = None,
         auth_token: Optional[str] = None,
@@ -158,8 +162,8 @@ class MCPOWrapper:
 
 def start_mcpo_wrapper(
     mcp_host: str = "localhost",
-    mcp_port: int = 8070,
-    mcpo_port: int = 8071,
+    mcp_port: int = _MCP_PORT,
+    mcpo_port: int = _MCPO_PORT,
     mcpo_host: str = "0.0.0.0",
     mcpo_api_key: Optional[str] = None,
     auth_token: Optional[str] = None,
@@ -170,8 +174,8 @@ def start_mcpo_wrapper(
 
     Args:
         mcp_host: Host where MCP server is running (default: localhost)
-        mcp_port: Port where MCP server is listening (default: 8070)
-        mcpo_port: Port for MCPO proxy to listen on (default: 8071)
+        mcp_port: Port where MCP server is listening (from GOFR_DIG_MCP_PORT env var)
+        mcpo_port: Port for MCPO proxy to listen on (from GOFR_DIG_MCPO_PORT env var)
         mcpo_host: Host for MCPO proxy to bind to (default: 0.0.0.0)
         mcpo_api_key: API key for Open WebUI -> MCPO (default: from env or None for no auth)
         auth_token: JWT token for MCPO -> MCP (default: from env or None)

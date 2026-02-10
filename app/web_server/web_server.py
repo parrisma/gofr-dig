@@ -1,5 +1,6 @@
 """GOFR-DIG Web Server - Minimal stub implementation for testing."""
 
+import os
 from typing import Optional, Any
 
 from starlette.applications import Starlette
@@ -39,7 +40,7 @@ class GofrDigWebServer:
         self,
         auth_service: Optional[AuthService] = None,
         host: str = "0.0.0.0",
-        port: int = 8072,
+        port: int = int(os.environ.get("GOFR_DIG_WEB_PORT", "0")),
     ):
         self.auth_service = auth_service
         self.host = host

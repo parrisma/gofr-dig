@@ -15,11 +15,12 @@ Usage:
     uv run scripts/setup_approle.py
 
     # Or with explicit env
-    GOFR_VAULT_URL=http://gofr-vault:8201 GOFR_VAULT_TOKEN=<root-token> \
+    GOFR_VAULT_URL=http://gofr-vault:$GOFR_VAULT_PORT GOFR_VAULT_TOKEN=<root-token> \
         uv run scripts/setup_approle.py
 
 Environment Variables:
-    GOFR_VAULT_URL      Vault URL (default: http://gofr-vault:8201)
+    GOFR_VAULT_URL      Vault URL (built from GOFR_VAULT_PORT if not set)
+    GOFR_VAULT_PORT     Vault port (from gofr_ports.env; used to build default URL)
     GOFR_VAULT_TOKEN    Vault root token (or reads from secrets/vault_root_token)
     VAULT_ADDR           Fallback for Vault URL
     VAULT_TOKEN          Fallback for Vault token
@@ -34,6 +35,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 SECRETS_DIR = PROJECT_ROOT / "secrets"
+FALLBACK_SECRETS_DIR = PROJECT_ROOT / "lib" / "gofr-common" / "secrets"
 SERVICE_CREDS_DIR = SECRETS_DIR / "service_creds"
 
 # Add gofr-common src to path
@@ -64,19 +66,35 @@ def log_error(msg: str) -> None:
 
 def resolve_vault_config() -> VaultConfig:
     """Resolve Vault URL and token from env vars or secrets file."""
+    vault_port = os.environ.get("GOFR_VAULT_PORT", "")
+    default_url = f"http://gofr-vault:{vault_port}" if vault_port else ""
     vault_url = (
         os.environ.get("GOFR_VAULT_URL")
         or os.environ.get("VAULT_ADDR")
-        or "http://gofr-vault:8201"
+        or default_url
     )
+    if not vault_url:
+        log_error(
+            "No Vault URL found. Set GOFR_VAULT_URL or GOFR_VAULT_PORT "
+            "(from gofr_ports.env)."
+        )
+        sys.exit(1)
 
     vault_token = os.environ.get("GOFR_VAULT_TOKEN") or os.environ.get("VAULT_TOKEN")
     if not vault_token:
+        # Try primary path, then fallback to gofr-common submodule
         token_file = SECRETS_DIR / "vault_root_token"
+        fallback_token_file = FALLBACK_SECRETS_DIR / "vault_root_token"
         if token_file.exists():
             vault_token = token_file.read_text().strip()
+        elif fallback_token_file.exists():
+            vault_token = fallback_token_file.read_text().strip()
         else:
-            log_error(f"No Vault token found. Set GOFR_VAULT_TOKEN or create {token_file}")
+            log_error(
+                "No Vault token found. Set GOFR_VAULT_TOKEN or bootstrap Vault:\n"
+                f"  Checked: {token_file}\n"
+                f"  Checked: {fallback_token_file}"
+            )
             sys.exit(1)
 
     return VaultConfig(url=vault_url, token=vault_token)

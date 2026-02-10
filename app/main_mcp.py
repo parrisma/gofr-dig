@@ -30,8 +30,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_MCP_PORT", "8070")),
-        help="Port number to listen on (default: 8070, or GOFR_DIG_MCP_PORT env var)",
+        default=int(os.environ["GOFR_DIG_MCP_PORT"]),
+        help="Port number to listen on (from GOFR_DIG_MCP_PORT env var)",
     )
     parser.add_argument(
         "--jwt-secret",
@@ -60,7 +60,7 @@ if __name__ == "__main__":
         "--web-url",
         type=str,
         default=None,
-        help="Web server base URL for proxy mode (default: http://localhost:8072, or GOFR_DIG_WEB_URL env var)",
+        help="Web server base URL for proxy mode (default: from GOFR_DIG_WEB_URL env var or localhost)",
     )
     parser.add_argument(
         "--proxy-url-mode",
@@ -125,7 +125,7 @@ if __name__ == "__main__":
             transport="HTTP Streamable",
             jwt_enabled=auth_service is not None,
             proxy_mode=args.proxy_url_mode.upper(),
-            web_url=args.web_url or "http://localhost:8072",
+            web_url=args.web_url or f"http://localhost:{os.environ['GOFR_DIG_WEB_PORT']}",
             templates_dir=args.templates_dir or "(default)",
             styles_dir=args.styles_dir or "(default)",
         )

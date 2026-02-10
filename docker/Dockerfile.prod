@@ -11,9 +11,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv for fast Python package management
 RUN pip install --no-cache-dir uv
 
-# Create gofr-dig user and group
-RUN groupadd --system gofr-dig && \
-    useradd --system --gid gofr-dig --home-dir /home/gofr-dig --create-home gofr-dig
+# Create gofr-dig user and group with standard GOFR UID/GID (1000:1000)
+# All GOFR containers use UID 1000 / GID 1000 regardless of username,
+# so shared Docker volumes (gofr-secrets, etc.) just work without chown.
+ARG GOFR_UID=1000
+ARG GOFR_GID=1000
+RUN groupadd --gid ${GOFR_GID} gofr-dig && \
+    useradd --uid ${GOFR_UID} --gid gofr-dig --home-dir /home/gofr-dig --create-home gofr-dig
 
 # Create application directories
 RUN mkdir -p /home/gofr-dig/app \
@@ -45,20 +49,18 @@ RUN uv pip install mcpo
 # Fix ownership after installation
 RUN chown -R gofr-dig:gofr-dig /home/gofr-dig
 
-# Inject Vault AppRole credentials (baked into image at build time)
-# Future: will migrate to a shared Docker volume across all gofr services
+# Vault AppRole credentials are now provided at runtime via the gofr-secrets
+# Docker volume mounted at /run/secrets (see compose.prod.yml).
+# We only create the directory here so the mount point exists.
 RUN mkdir -p /run/secrets && chown gofr-dig:gofr-dig /run/secrets
-COPY --chown=gofr-dig:gofr-dig lib/gofr-common/secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
-RUN chmod 600 /run/secrets/vault_creds
 
-# Expose ports (from gofr_ports.env: gofr-dig = 8070-8072)
-# 8070: MCP Server
-# 8071: MCPO Server
-# 8072: Web Server
-ARG GOFR_DIG_MCP_PORT=8070
-ARG GOFR_DIG_MCPO_PORT=8071
-ARG GOFR_DIG_WEB_PORT=8072
-EXPOSE $GOFR_DIG_MCP_PORT $GOFR_DIG_MCPO_PORT $GOFR_DIG_WEB_PORT
+# Ports are configured at runtime via compose.yml + gofr_ports.env.
+# EXPOSE uses build ARGs so `docker inspect` reflects the correct ports.
+# Pass --build-arg or set in compose build.args to override.
+ARG GOFR_DIG_MCP_PORT
+ARG GOFR_DIG_MCPO_PORT
+ARG GOFR_DIG_WEB_PORT
+EXPOSE ${GOFR_DIG_MCP_PORT:-0} ${GOFR_DIG_MCPO_PORT:-0} ${GOFR_DIG_WEB_PORT:-0}
 
 # Default: run as gofr-dig user
 # compose.prod.yml overrides entrypoint per service

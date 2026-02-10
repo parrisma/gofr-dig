@@ -1,7 +1,7 @@
 #!/bin/bash
 # Run GOFR-DIG development container
 # Uses gofr-dig-dev:latest image (built from gofr-base:latest)
-# Standard user: gofr (UID 1000, GID 1000)
+# Detects host UID/GID so mounted files have correct ownership.
 
 set -e
 
@@ -9,10 +9,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # gofr-common is now a git submodule at lib/gofr-common, no separate mount needed
 
-# Standard GOFR user - all projects use same user
+# Detect host user's UID/GID (the dev container must match so bind-mounted
+# files have the right ownership).  Prod/test images always use 1000:1000.
 GOFR_USER="gofr"
-GOFR_UID=1000
-GOFR_GID=1000
+GOFR_UID=$(id -u)
+GOFR_GID=$(id -g)
 
 # Container and image names
 CONTAINER_NAME="gofr-dig-dev"
@@ -40,9 +41,13 @@ done
 echo "======================================================================="
 echo "Starting GOFR-DIG Development Container"
 echo "======================================================================="
-echo "User: ${GOFR_USER} (UID=${GOFR_UID}, GID=${GOFR_GID})"
+echo "Host user: $(whoami) (UID=${GOFR_UID}, GID=${GOFR_GID})"
+if [ "$GOFR_UID" != "1000" ] || [ "$GOFR_GID" != "1000" ]; then
+    echo "NOTE: Host UID/GID differs from image default (1000:1000)."
+    echo "      Container will run with --user ${GOFR_UID}:${GOFR_GID}"
+fi
 echo "Networks: $DOCKER_NETWORK, $GOFR_NETWORK"
-echo "Ports: none (dev container is for code editing; prod owns 8070-8072)"
+echo "Ports: none (dev container is for code editing; prod owns the service ports)"
 echo "======================================================================="
 
 # Create docker network if it doesn't exist
@@ -62,6 +67,13 @@ VOLUME_NAME="gofr-dig-data-dev"
 if ! docker volume inspect $VOLUME_NAME >/dev/null 2>&1; then
     echo "Creating volume: $VOLUME_NAME"
     docker volume create $VOLUME_NAME
+fi
+
+# Create shared secrets volume (shared across all GOFR projects)
+SECRETS_VOLUME="gofr-secrets"
+if ! docker volume inspect $SECRETS_VOLUME >/dev/null 2>&1; then
+    echo "Creating volume: $SECRETS_VOLUME"
+    docker volume create $SECRETS_VOLUME
 fi
 
 # Stop and remove existing container
@@ -112,13 +124,21 @@ fi
 
 # ---- Run container ----------------------------------------------------------
 # NOTE: No host port bindings — the dev container is for code editing.
-# Production containers (via start-prod.sh) own ports 8070-8072.
+# Production containers (via start-prod.sh) own the service ports.
+# Build --user flag: only override when host UID/GID != image default (1000)
+USER_ARGS=""
+if [ "$GOFR_UID" != "1000" ] || [ "$GOFR_GID" != "1000" ]; then
+    USER_ARGS="--user ${GOFR_UID}:${GOFR_GID}"
+fi
+
 echo "Running: docker run -d --name $CONTAINER_NAME ..."
 CONTAINER_ID=$(docker run -d \
     --name "$CONTAINER_NAME" \
     --network "$DOCKER_NETWORK" \
+    $USER_ARGS \
     -v "$PROJECT_ROOT:/home/gofr/devroot/gofr-dig:rw" \
     -v ${VOLUME_NAME}:/home/gofr/devroot/gofr-dig/data:rw \
+    -v ${SECRETS_VOLUME}:/home/gofr/devroot/gofr-dig/secrets:rw \
     $DOCKER_GID_ARGS \
     -e GOFRDIG_ENV=development \
     -e GOFRDIG_DEBUG=true \

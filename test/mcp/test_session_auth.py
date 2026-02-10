@@ -12,8 +12,10 @@ Covers:
 """
 
 import json
+import os
 import pytest
 from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 from gofr_common.auth.exceptions import AuthError
 from gofr_common.storage.exceptions import PermissionDeniedError
@@ -23,12 +25,23 @@ from app.mcp_server.mcp_server import (
     _resolve_group_from_tokens,
 )
 from app.session.manager import SessionManager
-from conftest import _create_test_auth_service
+from conftest import _create_test_auth_service, _build_vault_client
+
+# Base URL for get_session_urls tests — derived from env (set by gofr_ports.env).
+TEST_WEB_BASE_URL = "http://web:{}".format(
+    os.environ.get("GOFR_DIG_WEB_PORT", os.environ.get("GOFR_DIG_WEB_PORT_TEST", ""))
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _make_auth_service():
+    """Create an isolated test AuthService with a unique Vault path prefix."""
+    vault_client = _build_vault_client()
+    path_prefix = f"gofr/tests/{uuid4()}"
+    return _create_test_auth_service(vault_client, path_prefix)
 
 def _make_session_manager_mock(group: str | None = "team-a") -> MagicMock:
     """Mock SessionManager with canned data."""
@@ -62,7 +75,7 @@ def _make_session_manager_mock(group: str | None = "team-a") -> MagicMock:
 
 def _create_token(groups: list[str], auth_service=None) -> str:
     """Create a JWT for the given groups using the test auth service."""
-    svc = auth_service or _create_test_auth_service()
+    svc = auth_service or _make_auth_service()
     # Ensure the groups exist in the registry
     for g in groups:
         try:
@@ -87,14 +100,14 @@ class TestResolveGroupFromTokens:
 
     def test_none_when_no_tokens(self):
         """No tokens provided → anonymous (None)."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             assert _resolve_group_from_tokens(None) is None
             assert _resolve_group_from_tokens([]) is None
 
     def test_returns_first_group(self):
         """Valid token with groups → returns first group."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-a", "team-b"], svc)
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             result = _resolve_group_from_tokens([token])
@@ -102,7 +115,7 @@ class TestResolveGroupFromTokens:
 
     def test_strips_bearer_prefix(self):
         """Bearer prefix is stripped before verification."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-x"], svc)
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             result = _resolve_group_from_tokens([f"Bearer {token}"])
@@ -110,14 +123,14 @@ class TestResolveGroupFromTokens:
 
     def test_invalid_token_raises_auth_error(self):
         """Invalid token → AuthError."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             with pytest.raises(AuthError):
                 _resolve_group_from_tokens(["garbage-jwt"])
 
     def test_tries_next_on_auth_error(self):
         """If first token is bad but second is valid, uses second."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         good_token = _create_token(["team-ok"], svc)
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             result = _resolve_group_from_tokens(["bad-token", good_token])
@@ -149,7 +162,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_valid_token_passes_group(self):
         """Valid auth_tokens → extracted group passed to SessionManager."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-a"], svc)
         mgr = _make_session_manager_mock(group="team-a")
 
@@ -164,7 +177,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_permission_denied_on_group_mismatch(self):
         """SessionManager raises PermissionDeniedError → PERMISSION_DENIED response."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock(group="team-a")
         mgr.get_session_info.side_effect = PermissionDeniedError("Access denied")
@@ -182,7 +195,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_invalid_token_returns_auth_error(self):
         """Bad auth_tokens → AUTH_ERROR response."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         mgr = _make_session_manager_mock()
 
         with patch("app.mcp_server.mcp_server.session_manager", mgr), \
@@ -198,7 +211,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_get_session_chunk_with_auth(self):
         """get_session_chunk passes group from token."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-c"], svc)
         mgr = _make_session_manager_mock(group="team-c")
 
@@ -213,7 +226,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_get_session_chunk_permission_denied(self):
         """get_session_chunk with wrong group → PERMISSION_DENIED."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock()
         mgr.get_chunk.side_effect = PermissionDeniedError("Access denied")
@@ -230,7 +243,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_list_sessions_with_group(self):
         """list_sessions passes group to SessionManager."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-a"], svc)
         mgr = _make_session_manager_mock(group="team-a")
 
@@ -254,7 +267,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_get_session_urls_with_auth(self):
         """get_session_urls passes group from token."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-d"], svc)
         mgr = _make_session_manager_mock(group="team-d")
 
@@ -264,7 +277,7 @@ class TestMCPSessionAuthHandlers:
                 "get_session_urls",
                 {
                     "session_id": "s1",
-                    "base_url": "http://web:8072",
+                    "base_url": TEST_WEB_BASE_URL,
                     "auth_tokens": [token],
                 },
             )
@@ -275,7 +288,7 @@ class TestMCPSessionAuthHandlers:
     @pytest.mark.asyncio
     async def test_get_session_urls_permission_denied(self):
         """get_session_urls with wrong group → PERMISSION_DENIED."""
-        svc = _create_test_auth_service()
+        svc = _make_auth_service()
         token = _create_token(["team-b"], svc)
         mgr = _make_session_manager_mock()
         mgr.get_session_info.side_effect = PermissionDeniedError("Access denied")
@@ -286,7 +299,7 @@ class TestMCPSessionAuthHandlers:
                 "get_session_urls",
                 {
                     "session_id": "s1",
-                    "base_url": "http://web:8072",
+                    "base_url": TEST_WEB_BASE_URL,
                     "auth_tokens": [token],
                 },
             )

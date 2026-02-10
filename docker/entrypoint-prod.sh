@@ -6,9 +6,9 @@
 #
 # Environment variables (all prefixed with GOFR_DIG_ to match Python code):
 #   GOFR_DIG_JWT_SECRET   - JWT signing secret
-#   GOFR_DIG_MCP_PORT     - MCP server port (default: 8070)
-#   GOFR_DIG_MCPO_PORT    - MCPO proxy port (default: 8071)
-#   GOFR_DIG_WEB_PORT     - Web server port (default: 8072)
+#   GOFR_DIG_MCP_PORT     - MCP server port (from gofr_ports.env)
+#   GOFR_DIG_MCPO_PORT    - MCPO proxy port (from gofr_ports.env)
+#   GOFR_DIG_WEB_PORT     - Web server port (from gofr_ports.env)
 #   GOFR_DIG_DATA_DIR     - Data root directory
 #   GOFR_DIG_STORAGE_DIR  - Storage directory
 #   GOFR_DIG_NO_AUTH      - Set to "1" to disable authentication
@@ -19,9 +19,9 @@ set -e
 # These names MUST match what the Python code reads via
 # resolve_auth_config(env_prefix="GOFR_DIG") and os.environ.get("GOFR_DIG_*")
 export GOFR_DIG_JWT_SECRET="${GOFR_DIG_JWT_SECRET:-}"
-export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:-8070}"
-export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT:-8071}"
-export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:-8072}"
+export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:?GOFR_DIG_MCP_PORT not set — source gofr_ports.env}"
+export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT:?GOFR_DIG_MCPO_PORT not set — source gofr_ports.env}"
+export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:?GOFR_DIG_WEB_PORT not set — source gofr_ports.env}"
 export GOFR_DIG_DATA_DIR="${GOFR_DIG_DATA_DIR:-/home/gofr-dig/data}"
 export GOFR_DIG_STORAGE_DIR="${GOFR_DIG_STORAGE_DIR:-/home/gofr-dig/data/storage}"
 export GOFR_DIG_NO_AUTH="${GOFR_DIG_NO_AUTH:-}"

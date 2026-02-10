@@ -42,7 +42,10 @@ RUN chmod 755 /entrypoint-vault.sh
 HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
     CMD vault status || exit 1
 
-EXPOSE 8201 8202
+# Vault API + cluster ports — matches GOFR_VAULT_PORT from gofr_ports.env
+ARG GOFR_VAULT_PORT
+ARG GOFR_VAULT_CLUSTER_PORT
+EXPOSE ${GOFR_VAULT_PORT:-0} ${GOFR_VAULT_CLUSTER_PORT:-0}
 
 ENTRYPOINT ["/entrypoint-vault.sh"]
 CMD ["server", "-config=/vault/config/vault.hcl"]

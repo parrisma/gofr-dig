@@ -215,7 +215,10 @@ def configure_test_auth_environment():
     os.environ["GOFR_DIG_AUTH_BACKEND"] = "vault"
 
     # Default to local test vault if not already set
-    os.environ.setdefault("GOFR_DIG_VAULT_URL", "http://localhost:8301")
+    vault_port = os.environ.get("GOFR_VAULT_PORT_TEST", "")
+    default_vault_url = f"http://localhost:{vault_port}" if vault_port else ""
+    if default_vault_url:
+        os.environ.setdefault("GOFR_DIG_VAULT_URL", default_vault_url)
     os.environ.setdefault("GOFR_DIG_VAULT_TOKEN", "gofr-dev-root-token")
 
     yield

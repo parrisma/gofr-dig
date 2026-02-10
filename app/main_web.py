@@ -32,8 +32,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("GOFR_DIG_WEB_PORT", "8072")),
-        help="Port number to listen on (default: 8072, or GOFR_DIG_WEB_PORT env var)",
+        default=int(os.environ["GOFR_DIG_WEB_PORT"]),
+        help="Port number to listen on (from GOFR_DIG_WEB_PORT env var)",
     )
     parser.add_argument(
         "--jwt-secret",
