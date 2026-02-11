@@ -319,6 +319,131 @@ seed_secrets_volume() {
   ok "Secrets volumes seeded."
 }
 
+ensure_vault_healthy() {
+  # Post-platform-bootstrap safety net: verify Vault is fully operational.
+  # This catches cases where platform bootstrap reported success but Vault
+  # ended up sealed or missing KV/JWT configuration.
+
+  local manage_script="${PROJECT_ROOT}/lib/gofr-common/scripts/manage_vault.sh"
+  local secrets_dir="${PROJECT_ROOT}/lib/gofr-common/secrets"
+  local container="gofr-vault"
+  local max_wait=30  # seconds
+  local interval=2
+
+  # Helper: reliable sealed check using JSON output
+  _vault_is_sealed() {
+    local sj
+    sj=$(docker exec "$container" vault status -format=json 2>/dev/null) || return 0
+    local sealed
+    sealed=$(echo "$sj" | grep -o '"sealed": *[a-z]*' | sed 's/.*: *//')
+    [[ "$sealed" == "true" ]]
+  }
+
+  # Helper: wait for Vault API to be responsive and unsealed
+  _wait_vault_ready() {
+    local elapsed=0
+    while (( elapsed < max_wait )); do
+      local sj
+      sj=$(docker exec "$container" vault status -format=json 2>/dev/null) || true
+      if [[ -n "$sj" ]]; then
+        local sealed
+        sealed=$(echo "$sj" | grep -o '"sealed": *[a-z]*' | sed 's/.*: *//')
+        if [[ "$sealed" == "false" ]]; then
+          return 0
+        fi
+      fi
+      sleep "$interval"
+      elapsed=$((elapsed + interval))
+    done
+    return 1
+  }
+
+  # 1. Container must be running
+  if ! docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
+    warn "Vault container not running — attempting start..."
+    if [[ -f "$manage_script" ]]; then
+      bash "$manage_script" start
+    else
+      die "Vault container not running and manage_vault.sh not found." \
+        "Run: ./lib/gofr-common/scripts/manage_vault.sh start"
+    fi
+  fi
+  ok "Vault container is running."
+
+  # 2. Must be unsealed (with reliable JSON check + wait)
+  if _vault_is_sealed; then
+    warn "Vault is sealed — attempting unseal..."
+    if [[ -f "$manage_script" ]]; then
+      bash "$manage_script" unseal
+    fi
+  fi
+  # Wait for Vault to be fully ready (handles post-start race)
+  info "Waiting for Vault API to be responsive and unsealed..."
+  if ! _wait_vault_ready; then
+    die "Vault did not become ready within ${max_wait}s." \
+      "Run: ./lib/gofr-common/scripts/manage_vault.sh unseal (or bootstrap)"
+  fi
+  ok "Vault is unsealed and API is responsive."
+
+  # 3. Root token must exist
+  local root_token_file=""
+  if [[ -f "${PROJECT_ROOT}/secrets/vault_root_token" ]]; then
+    root_token_file="${PROJECT_ROOT}/secrets/vault_root_token"
+  elif [[ -f "${secrets_dir}/vault_root_token" ]]; then
+    root_token_file="${secrets_dir}/vault_root_token"
+  else
+    die "Vault root token not found." \
+      "Run: ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
+  fi
+  local root_token
+  root_token="$(cat "$root_token_file")"
+  ok "Vault root token found."
+
+  # 4. KV secrets engine must be enabled at secret/
+  if ! docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+       "$container" vault secrets list 2>/dev/null | grep -q "^secret/"; then
+    warn "KV secrets engine not enabled — enabling..."
+    docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+      "$container" vault secrets enable -path=secret kv-v2 || \
+      die "Failed to enable KV secrets engine." \
+        "Run: ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
+  fi
+  ok "KV secrets engine enabled at secret/."
+
+  # 5. JWT signing secret must exist
+  if ! docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+       "$container" vault kv get -field=value secret/gofr/config/jwt-signing-secret >/dev/null 2>&1; then
+    warn "JWT signing secret missing — creating..."
+    local jwt_secret
+    jwt_secret="$(openssl rand -hex 32)"
+    docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+      "$container" vault kv put secret/gofr/config/jwt-signing-secret value="${jwt_secret}" >/dev/null 2>&1 || \
+      die "Failed to write JWT signing secret to Vault." \
+        "Run: ./lib/gofr-common/scripts/manage_vault.sh jwt-secret"
+  fi
+  ok "JWT signing secret present in Vault."
+
+  # 6. AppRole auth must be enabled
+  if ! docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+       "$container" vault auth list 2>/dev/null | grep -q "approle/"; then
+    warn "AppRole auth not enabled — enabling..."
+    docker exec -e VAULT_ADDR="http://127.0.0.1:8201" -e VAULT_TOKEN="${root_token}" \
+      "$container" vault auth enable approle || \
+      die "Failed to enable AppRole auth." \
+        "Run: ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
+  fi
+  ok "AppRole auth method enabled."
+
+  # 7. Final health check via manage_vault.sh
+  if [[ -f "$manage_script" ]]; then
+    if ! bash "$manage_script" health; then
+      warn "Vault health check reported warnings (see above); continuing."
+    else
+      ok "Vault health check passed."
+    fi
+  fi
+}
+
 start_dev_container() {
   if docker ps --format '{{.Names}}' | grep -q '^gofr-dig-dev$'; then
     ok "Dev container already running: gofr-dig-dev"
@@ -374,6 +499,8 @@ main() {
   run_step "Validate Docker availability" require_docker
   run_step "Ensure submodule" ensure_submodule
   run_step "Run platform bootstrap" run_platform_bootstrap
+
+  run_step "Verify Vault is healthy" ensure_vault_healthy
 
   run_step "Build dev image" build_dev_image || true
   run_step "Build prod image" build_prod_image || true
