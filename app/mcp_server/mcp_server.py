@@ -524,6 +524,16 @@ async def handle_list_tools() -> List[Tool]:
                             "Automatically enabled when depth > 1. Useful for large single pages too."
                         ),
                     },
+                    "filter_noise": {
+                        "type": "boolean",
+                        "description": (
+                            "Strip advertisement / cookie-banner noise from the extracted text. "
+                            "Removes ad-related HTML elements (by class/id) and filters noise "
+                            "lines such as 'Advertisement', 'Sponsored Content', and cookie "
+                            "consent prompts. Default true."
+                        ),
+                        "default": True,
+                    },
                     "chunk_size": {
                         "type": "integer",
                         "description": "Session chunk size in characters (default 4000). Only used when session storage is active.",
@@ -837,6 +847,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     include_links = arguments.get("include_links", True)
     include_images = arguments.get("include_images", False)
     include_meta = arguments.get("include_meta", True)
+    filter_noise = arguments.get("filter_noise", True)
     use_session = arguments.get("session", False)
     chunk_size = arguments.get("chunk_size")
 
@@ -898,6 +909,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 fetch_result.content,
                 selector,
                 url=fetch_result.url,
+                filter_noise=filter_noise,
             )
         else:
             content = extractor.extract(
@@ -906,6 +918,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 include_links=include_links,
                 include_images=include_images,
                 include_meta=include_meta,
+                filter_noise=filter_noise,
             )
 
         if not content.success:

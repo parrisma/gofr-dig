@@ -66,6 +66,54 @@ class ContentExtractor:
     # Tags that typically contain the main content
     MAIN_CONTENT_TAGS = {"main", "article", "section", "div"}
 
+    # CSS class/id patterns that indicate ad or noise elements
+    AD_ELEMENT_PATTERNS = re.compile(
+        r"(?i)"
+        r"(?:^|[_-])(?:ad|ads|advert|advertisement|adslot|ad-slot|ad-container"
+        r"|adsbygoogle|sponsored|sponsor|promo|promotion|banner-ad"
+        r"|dfp|doubleclick|taboola|outbrain)"
+        r"|(?:ad|ads|advert|advertisement|adslot|ad-slot|ad-container"
+        r"|adsbygoogle|sponsored|sponsor|promo|promotion|banner-ad"
+        r"|dfp|doubleclick|taboola|outbrain)(?:[_-]|$)"
+    )
+
+    # Text-level noise lines to strip (case-insensitive exact or near-exact matches)
+    NOISE_LINE_PATTERNS = re.compile(
+        r"^\s*(?:"
+        # Ads & sponsorship
+        r"advertisement|advertisements|advertise(?:ment)?s?"
+        r"|sponsored\s*(?:content|post|links?)?"
+        r"|ad|ads"
+        r"|promoted\s*(?:content|stories)?"
+        # Media labels / leaked icon names
+        r"|multimedia|video|videos|slideshow|gallery|photo|photos"
+        r"|play\s+video|watch\s+video"
+        r"|videocam|photo_camera|play_arrow|play_circle"
+        # Social / follow / share
+        r"|\+?\s*follow(?:\s+us)?"
+        r"|share(?:\s+this)?|tweet|email\s+this|print"
+        # Read-more / load-more prompts
+        r"|read\s+more|see\s+more|show\s+more|load\s+more|more\s+on\s+this"
+        # Related / recommended
+        r"|related\s+(?:stories|articles|topics|posts)"
+        r"|you\s+may\s+also\s+like|recommended\s+for\s+you"
+        # Comments
+        r"|comments?|leave\s+a\s+comment|post\s+a\s+comment"
+        # Cookie / consent
+        r"|cookie\s+(?:policy|consent|settings|preferences)"
+        r"|accept\s+(?:all\s+)?cookies?"
+        r"|we\s+use\s+cookies"
+        # Newsletter / subscribe
+        r"|sign\s+up\s+(?:for|to)\s+(?:our\s+)?newsletter"
+        r"|subscribe\s+(?:now|today|for\s+free)"
+        # Skip-nav
+        r"|skip\s+(?:to\s+)?(?:content|main|navigation)"
+        # Standalone punctuation / decoration
+        r"|[-–—|•·]{1,3}"
+        r")\s*$",
+        re.IGNORECASE,
+    )
+
     # Semantic selectors for main content
     MAIN_CONTENT_SELECTORS = [
         "main",
@@ -95,6 +143,7 @@ class ContentExtractor:
         include_links: bool = True,
         include_images: bool = True,
         include_meta: bool = True,
+        filter_noise: bool = False,
     ) -> ExtractedContent:
         """Extract content from HTML.
 
@@ -119,6 +168,10 @@ class ContentExtractor:
         for tag in soup.find_all(self.REMOVE_TAGS):
             tag.decompose()
 
+        # Remove ad/noise elements when filtering is enabled
+        if filter_noise:
+            self._remove_ad_elements(soup)
+
         # Get the scope for extraction
         scope = soup
         if selector:
@@ -140,6 +193,10 @@ class ContentExtractor:
 
         # Extract main text
         text = self._extract_text(scope)
+
+        # Apply text-level noise filtering
+        if filter_noise:
+            text = self._filter_noise_text(text)
 
         # Extract headings
         headings = self._extract_headings(scope)
@@ -209,6 +266,40 @@ class ContentExtractor:
                 meta[name_str] = content_str
 
         return meta
+
+    def _remove_ad_elements(self, soup: BeautifulSoup) -> None:
+        """Remove HTML elements that look like ads or noise.
+
+        Inspects class and id attributes for common ad-related patterns.
+        """
+        to_remove = []
+        for tag in soup.find_all(True):
+            # Skip tags already decomposed (attrs becomes None)
+            if not hasattr(tag, "attrs") or tag.attrs is None:
+                continue
+            cls = tag.get("class")
+            classes = " ".join(cls) if isinstance(cls, list) else (str(cls) if cls else "")
+            tag_id = tag.get("id") or ""
+            combined = f"{classes} {tag_id}"
+            if combined.strip() and self.AD_ELEMENT_PATTERNS.search(combined):
+                to_remove.append(tag)
+        for tag in to_remove:
+            tag.decompose()
+        if to_remove:
+            logger.debug("Removed ad/noise elements", count=len(to_remove))
+
+    def _filter_noise_text(self, text: str) -> str:
+        """Remove noise lines from extracted text.
+
+        Strips lines that match common advertisement / cookie-banner
+        patterns and collapses resulting blank-line runs.
+        """
+        lines = text.split("\n")
+        filtered = [line for line in lines if not self.NOISE_LINE_PATTERNS.match(line)]
+        result = "\n".join(filtered)
+        # Collapse triple+ newlines that may result from removal
+        result = re.sub(r"\n{3,}", "\n\n", result)
+        return result.strip()
 
     def _extract_text(self, element) -> str:
         """Extract clean text from an element.
@@ -324,6 +415,7 @@ class ContentExtractor:
         html: str,
         selector: str,
         url: str = "",
+        filter_noise: bool = False,
     ) -> ExtractedContent:
         """Extract content from elements matching a CSS selector.
 
@@ -340,6 +432,10 @@ class ContentExtractor:
         except Exception as e:
             logger.error("Failed to parse HTML for selector extraction", error=str(e), selector=selector)
             return ExtractedContent(url=url, error=f"Parse error: {str(e)}")
+
+        # Remove ad/noise elements when filtering is enabled
+        if filter_noise:
+            self._remove_ad_elements(soup)
 
         try:
             elements = soup.select(selector)
@@ -363,14 +459,20 @@ class ContentExtractor:
             if text:
                 texts.append(text)
 
+        combined_text = "\n\n".join(texts)
+        if filter_noise:
+            combined_text = self._filter_noise_text(combined_text)
+
         return ExtractedContent(
             url=url,
             title=self._extract_title(soup),
-            text="\n\n".join(texts),
+            text=combined_text,
             language=self._extract_language(soup),
         )
 
-    def extract_main_content(self, html: str, url: str = "") -> ExtractedContent:
+    def extract_main_content(
+        self, html: str, url: str = "", filter_noise: bool = False,
+    ) -> ExtractedContent:
         """Extract the main content area of a page.
 
         Tries various common selectors to find the main content.
@@ -392,6 +494,10 @@ class ContentExtractor:
         for tag in soup.find_all(self.REMOVE_TAGS):
             tag.decompose()
 
+        # Remove ad/noise elements when filtering is enabled
+        if filter_noise:
+            self._remove_ad_elements(soup)
+
         # Try to find main content area
         main_element = None
         for selector in self.MAIN_CONTENT_SELECTORS:
@@ -404,10 +510,14 @@ class ContentExtractor:
         if main_element is None:
             main_element = soup.find("body") or soup
 
+        text = self._extract_text(main_element)
+        if filter_noise:
+            text = self._filter_noise_text(text)
+
         return ExtractedContent(
             url=url,
             title=self._extract_title(soup),
-            text=self._extract_text(main_element),
+            text=text,
             headings=self._extract_headings(main_element),
             links=self._extract_links(main_element, url),
             images=self._extract_images(main_element, url),
@@ -432,6 +542,7 @@ def extract_content(
     html: str,
     url: str = "",
     selector: Optional[str] = None,
+    filter_noise: bool = False,
 ) -> ExtractedContent:
     """Convenience function to extract content from HTML.
 
@@ -439,11 +550,12 @@ def extract_content(
         html: HTML content to parse
         url: Source URL
         selector: Optional CSS selector
+        filter_noise: Strip ad/noise elements and text lines
 
     Returns:
         ExtractedContent with extracted data
     """
     extractor = get_extractor()
     if selector:
-        return extractor.extract_by_selector(html, selector, url)
-    return extractor.extract_main_content(html, url)
+        return extractor.extract_by_selector(html, selector, url, filter_noise=filter_noise)
+    return extractor.extract_main_content(html, url, filter_noise=filter_noise)
