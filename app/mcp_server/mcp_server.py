@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 from typing import Any, AsyncIterator, Dict, List
 
 from mcp.server import Server
@@ -378,6 +379,7 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="Ping",
                 readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=False,
             ),
         ),
@@ -462,8 +464,9 @@ async def handle_list_tools() -> List[Tool]:
                 "- depth=3: three levels deep (slow, use sparingly). Same session response.\n\n"
                 "SESSION MODE:\n"
                 "When the response contains a session_id (depth>1, or session=true with depth=1), "
-                "use get_session_chunk(session_id, chunk_index) to retrieve text, "
-                "iterating chunk_index from 0 to total_chunks-1.\n\n"
+                "use get_session(session_id) to retrieve the full joined text in one call. "
+                "Alternatively, iterate with get_session_chunk(session_id, chunk_index) "
+                "from 0 to total_chunks-1 for finer control.\n\n"
                 "TIPS:\n"
                 "- Call get_structure first to find a good CSS selector, then pass it as 'selector'.\n"
                 "- Use include_links=false and include_meta=false if you only need text.\n"
@@ -599,6 +602,7 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="Get Structure",
                 readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=True,
             ),
         ),
@@ -607,8 +611,11 @@ async def handle_list_tools() -> List[Tool]:
             description=(
                 "Get metadata for a stored scraping session. "
                 "Returns: {success, session_id, url, total_chunks, total_size, created_at}.\n\n"
-                "Use this to find out how many chunks a session has before iterating with get_session_chunk. "
-                "The session_id comes from a previous get_content call (depth>1, or session=true)."
+                "Use this to check how many chunks a session has and its total size. "
+                "The session_id comes from a previous get_content call (depth>1, or session=true).\n\n"
+                "NEXT STEPS: Call get_session(session_id) to get the full text, "
+                "or get_session_chunk(session_id, chunk_index) for one chunk at a time.\n\n"
+                "Errors: SESSION_NOT_FOUND."
             ),
             inputSchema={
                 "type": "object",
@@ -624,6 +631,7 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="Get Session Info",
                 readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=False,
             ),
         ),
@@ -633,7 +641,10 @@ async def handle_list_tools() -> List[Tool]:
                 "Retrieve one chunk of text from a stored session. "
                 "Returns: {success, session_id, chunk_index, total_chunks, content}.\n\n"
                 "To read all content: iterate chunk_index from 0 to total_chunks-1. "
-                "Get total_chunks from get_session_info or from the get_content response that created the session."
+                "Get total_chunks from get_session_info or from the get_content response that created the session.\n\n"
+                "TIP: Prefer get_session(session_id) if you need all chunks at once "
+                "and the total size is under 5 MB.\n\n"
+                "Errors: SESSION_NOT_FOUND, CHUNK_NOT_FOUND."
             ),
             inputSchema={
                 "type": "object",
@@ -653,6 +664,7 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="Get Session Chunk",
                 readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=False,
             ),
         ),
@@ -662,7 +674,9 @@ async def handle_list_tools() -> List[Tool]:
                 "List all stored scraping sessions. "
                 "Returns: {success, sessions: [{session_id, url, total_chunks, total_size, created_at}], total}.\n\n"
                 "Use this to discover sessions from earlier scrapes. "
-                "Then call get_session_info or get_session_chunk with any session_id."
+                "Returns an empty list (total=0) when no sessions exist.\n\n"
+                "NEXT STEPS: Call get_session(session_id) to get full text, "
+                "or get_session_info(session_id) for metadata."
             ),
             inputSchema={
                 "type": "object",
@@ -673,17 +687,25 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="List Sessions",
                 readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=False,
             ),
         ),
         Tool(
             name="get_session_urls",
             description=(
-                "Get a list of plain HTTP URLs for every chunk in a session. "
-                "Returns: {success, session_id, url, total_chunks, chunk_urls: [url, ...]}.\n\n"
-                "Each URL is a ready-to-GET REST endpoint that returns one chunk's text. "
-                "Designed for automation services (N8N, Make, Zapier) that can fan-out HTTP requests.\n\n"
-                "Typical flow: get_content(depth=2) \u2192 get_session_urls(session_id) \u2192 HTTP GET each chunk_url."
+                "Get references to every chunk in a session.\n\n"
+                "When as_json=true (default): returns {success, session_id, url, total_chunks, "
+                "chunks: [{session_id, chunk_index}, ...]}.\n"
+                "When as_json=false: returns {success, session_id, url, total_chunks, "
+                "chunk_urls: [url, ...]}.\n\n"
+                "The JSON format is ideal for MCP-based automation (N8N, agents) that will call "
+                "get_session_chunk next. The URL format is for HTTP fan-out (Make, Zapier).\n\n"
+                "TIP: If you just need the full content, use get_session(session_id) instead \u2014 "
+                "it joins all chunks in one call.\n\n"
+                "Typical flow: get_content(depth=2) \u2192 get_session_urls(session_id) "
+                "\u2192 get_session_chunk for each chunk.\n\n"
+                "Errors: SESSION_NOT_FOUND."
             ),
             inputSchema={
                 "type": "object",
@@ -692,10 +714,19 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "string",
                         "description": "Session GUID from a previous get_content call.",
                     },
+                    "as_json": {
+                        "type": "boolean",
+                        "description": (
+                            "If true (default), return a list of {session_id, chunk_index} objects. "
+                            "If false, return a list of plain HTTP URLs for each chunk."
+                        ),
+                        "default": True,
+                    },
                     "base_url": {
                         "type": "string",
                         "description": (
                             "Override the web-server base URL (e.g. 'http://myhost:PORT'). "
+                            "Only used when as_json=false. "
                             "Auto-detected from GOFR_DIG_WEB_URL env or defaults to localhost if omitted."
                         ),
                     },
@@ -706,6 +737,47 @@ async def handle_list_tools() -> List[Tool]:
             annotations=ToolAnnotations(
                 title="Get Session URLs",
                 readOnlyHint=True,
+                idempotentHint=True,
+                openWorldHint=False,
+            ),
+        ),
+        Tool(
+            name="get_session",
+            description=(
+                "Retrieve and join ALL chunks of a session into a single text response. "
+                "PREFERRED over iterating get_session_chunk when you need the full content.\n\n"
+                "Returns: {success, session_id, url, total_chunks, total_size, content} "
+                "with the full concatenated text.\n\n"
+                "A max_bytes limit (default 5 MB) prevents returning excessively large content. "
+                "If the session exceeds max_bytes, a CONTENT_TOO_LARGE error is returned with the "
+                "actual size so you can fall back to get_session_chunk for chunk-by-chunk retrieval.\n\n"
+                "Typical flow: get_content(url, depth=2) \u2192 get_session(session_id).\n\n"
+                "Errors: SESSION_NOT_FOUND, CONTENT_TOO_LARGE."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {
+                        "type": "string",
+                        "description": "Session GUID from a previous get_content call.",
+                    },
+                    "max_bytes": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum allowed size in bytes for the joined content. "
+                            "Returns an error if the session exceeds this limit. "
+                            "Default: 5242880 (5 MB)."
+                        ),
+                        "default": 5242880,
+                    },
+                    **AUTH_TOKENS_SCHEMA,
+                },
+                "required": ["session_id"],
+            },
+            annotations=ToolAnnotations(
+                title="Get Full Session",
+                readOnlyHint=True,
+                idempotentHint=True,
                 openWorldHint=False,
             ),
         ),
@@ -740,6 +812,9 @@ async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextCon
 
     if name == "get_session_urls":
         return await _handle_get_session_urls(arguments)
+
+    if name == "get_session":
+        return await _handle_get_session(arguments)
 
     return _error_response("UNKNOWN_TOOL", f"Unknown tool: {name}", {"tool_name": name})
 
@@ -1387,6 +1462,7 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
             return _error_response("AUTH_ERROR", str(e))
         raise
 
+    as_json = arguments.get("as_json", True)
     base_url = _resolve_web_base_url(arguments.get("base_url"))
 
     try:
@@ -1394,22 +1470,25 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
         info = manager.get_session_info(session_id, group=group)
         total_chunks = info["total_chunks"]
 
-        chunk_urls = [
-            f"{base_url}/sessions/{session_id}/chunks/{i}"
-            for i in range(total_chunks)
-        ]
+        response: Dict[str, Any] = {
+            "success": True,
+            "session_id": session_id,
+            "url": info.get("url", ""),
+            "total_chunks": total_chunks,
+        }
 
-        return [
-            _json_text(
-                {
-                    "success": True,
-                    "session_id": session_id,
-                    "url": info.get("url", ""),
-                    "total_chunks": total_chunks,
-                    "chunk_urls": chunk_urls,
-                }
-            )
-        ]
+        if as_json:
+            response["chunks"] = [
+                {"session_id": session_id, "chunk_index": i}
+                for i in range(total_chunks)
+            ]
+        else:
+            response["chunk_urls"] = [
+                f"{base_url}/sessions/{session_id}/chunks/{i}"
+                for i in range(total_chunks)
+            ]
+
+        return [_json_text(response)]
     except Exception as e:
         if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
             return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
@@ -1428,6 +1507,83 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
 async def initialize_server() -> None:
     """Initialize server components."""
     logger.info("GOFR-DIG server initialized")
+
+
+async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
+    """Handle get_session tool call.
+
+    Retrieves all chunks from a session, concatenates them, and returns
+    the full content as a single text response.
+    """
+    session_id = arguments.get("session_id")
+    if not session_id:
+        return _error_response("INVALID_ARGUMENT", "session_id is required")
+
+    max_bytes = arguments.get("max_bytes", 5_242_880)  # 5 MB default
+
+    auth_tokens = arguments.get("auth_tokens")
+    try:
+        group = _resolve_group_from_tokens(auth_tokens)
+    except Exception as e:
+        if AuthError is not None and isinstance(e, AuthError):
+            return _error_response("AUTH_ERROR", str(e))
+        raise
+
+    try:
+        manager = get_session_manager()
+        info = manager.get_session_info(session_id, group=group)
+        total_size = info.get("total_size_bytes", 0)
+
+        if total_size > max_bytes:
+            return _error_response(
+                "CONTENT_TOO_LARGE",
+                (
+                    f"Session content is {total_size:,} bytes, "
+                    f"exceeding max_bytes limit of {max_bytes:,}. "
+                    f"Use get_session_chunk to retrieve chunks individually, "
+                    f"or increase max_bytes."
+                ),
+                {
+                    "session_id": session_id,
+                    "total_size_bytes": total_size,
+                    "max_bytes": max_bytes,
+                    "total_chunks": info["total_chunks"],
+                },
+            )
+
+        total_chunks = info["total_chunks"]
+        parts = []
+        for i in range(total_chunks):
+            chunk_text = manager.get_chunk(session_id, i, group=group)
+            parts.append(chunk_text)
+
+        content = "".join(parts)
+
+        return [
+            _json_text(
+                {
+                    "success": True,
+                    "session_id": session_id,
+                    "url": info.get("url", ""),
+                    "total_chunks": total_chunks,
+                    "total_size_bytes": len(content.encode("utf-8")),
+                    "content": content,
+                }
+            )
+        ]
+    except Exception as e:
+        if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
+            return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
+        if isinstance(e, GofrDigError):
+            return _exception_response(e)
+        logger.error(
+            "Unexpected error in get_session",
+            error=str(e),
+            session_id=session_id,
+        )
+        return _error_response(
+            "SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id}
+        )
 
 
 # Streamable HTTP setup

@@ -2,6 +2,23 @@
 
 **Web scraping for AI agents.** gofr-dig is an MCP server that lets LLMs and automation services fetch, extract, and paginate web content — with anti-detection, robots.txt compliance, and session-based chunking for large results.
 
+## Accessing N8N, OPenWebUI
+When N8N and OPenwebUi are run in dev container, find the IP of teh docker host and use that in teh URL NOT localhost
+
+$ ip route | awk '/default/ {print $3}'
+172.22.0.1
+
+so N8N in chrome = http://172.22.0.1:8084/setup
+
+## Connect N8N to gofr-dig (MCP)
+1. In N8N, open your workflow view and click the + button (top right).
+2. Search for and add an MCP Client node.
+3. Set Transport to HTTP Streamable.
+4. Set MCP Endpoint URL to one of these (note the trailing slash):
+  - http://gofr-dig-mcp:8070/mcp/
+  - http://localhost:8070/mcp/
+5. In Tool, choose From List and select the gofr-dig tool (a quick test is ping).
+
 ## What It Does
 
 | Capability | Description |

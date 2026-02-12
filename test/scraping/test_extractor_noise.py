@@ -4,8 +4,6 @@ Validates that filter_noise strips ad elements and noise text lines
 from extracted content.
 """
 
-import pytest
-
 from app.scraping.extractor import ContentExtractor, extract_content
 
 

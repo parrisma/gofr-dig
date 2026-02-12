@@ -54,7 +54,7 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "MAX_PAGES_EXCEEDED": "Too many pages requested. Reduce max_pages_per_level (max 20).",
     
     # Tool errors
-    "UNKNOWN_TOOL": "Available tools: ping, set_antidetection, get_content, get_structure, get_session_info, get_session_chunk, list_sessions.",
+    "UNKNOWN_TOOL": "Available tools: ping, set_antidetection, get_content, get_structure, get_session_info, get_session_chunk, list_sessions, get_session_urls, get_session.",
     
     # Argument validation
     "INVALID_ARGUMENT": "A required argument is missing or invalid. Check the tool schema for required parameters.",
