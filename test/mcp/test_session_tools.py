@@ -69,7 +69,7 @@ async def test_get_content_with_session(mock_session_manager):
                 
                 result = await handle_call_tool(
                     "get_content",
-                    {"url": "http://example.com", "session": True}
+                    {"url": "http://example.com", "session": True, "parse_results": False}
                 )
                 
                 # Verify session created

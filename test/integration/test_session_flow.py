@@ -62,7 +62,8 @@ class TestSessionFlow:
                     {
                         "url": target_url, 
                         "session": True,
-                        "chunk_size": CHUNK_SIZE
+                        "chunk_size": CHUNK_SIZE,
+                        "parse_results": False
                     }
                 )
                 response = parse_json(result)

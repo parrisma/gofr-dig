@@ -1,332 +1,232 @@
 # Tool Reference
 
-A complete list of commands available in `gofr-dig`.
+Complete reference for every MCP tool exposed by **gofr-dig**.
+Auto-generated from the live code — treat this as the authoritative source.
 
-For how to use them together, see the **[Workflow Guide](workflow.md)**.
-
-## Index
-
-- [`ping`](#ping) — Health check
-- [`set_antidetection`](#set_antidetection) — Configure scraping profile
-- [`get_content`](#get_content) — Fetch and extract page text
-- [`get_structure`](#get_structure) — Analyze page layout
-- [`get_session_info`](#get_session_info) — Get session metadata
-- [`get_session_chunk`](#get_session_chunk) — Retrieve one chunk
-- [`list_sessions`](#list_sessions) — Browse all sessions
-- [`get_session_urls`](#get_session_urls) — Get chunk references (JSON or URLs)
-- [`get_session`](#get_session) — Get full session content
-- [Error Codes](#error-codes)
-
-## Mini Spec: JWT Handling (MCP, MCPO, Web)
-
-This section defines auth behavior for these MCP tools:
-
-- `get_content`
-- `get_structure`
-- `get_session_info`
-- `get_session_chunk`
-- `list_sessions`
-- `get_session_urls`
-- `get_session`
-
-### API Authority Model
-
-- MCP is the **master API** and source of truth for capability semantics.
-- MCPO and Web are **auxiliary access paths** that expose the same capabilities.
-- Capability behavior should stay aligned across all three surfaces:
-  - same auth intent (public fallback + token override rules)
-  - same effective authorization scope (group 0 = primary group)
-  - same effective success/error outcomes (transport envelope may differ)
-
-### MCP Tool Contract
-
-- Each auth-aware MCP tool accepts optional `auth_token`:
-
-```json
-"auth_token": {
-  "type": "string",
-  "description": "JWT token for authentication"
-}
-```
-
-- `auth_token` is optional. Omitting it means public/anonymous access.
-- `ping` remains unauthenticated and does not accept `auth_token`.
-- If the token contains multiple groups, group index `0` is used as the effective scope.
-
-### MCP Token Resolution
-
-For MCP tool calls:
-
-1. `arguments.auth_token` (if present)
-2. Public/anonymous access
-
-Rules:
-
-- If a token is provided but invalid, return `AUTH_ERROR`.
-- If no token is provided, do **not** return auth error; continue as public.
-- If server runs with `--no-auth`, token verification is bypassed.
-
-### MCPO Behavior
-
-MCPO is an adapter over MCP and should preserve MCP semantics.
-
-- MCPO may pass an incoming `Authorization` header through to MCP transport.
-- If MCPO is configured with a static startup token, it may use that token when no caller token is present.
-- MCP tool-level auth semantics remain governed by MCP (`auth_token` argument and server auth mode).
-
-### Web API Behavior
-
-Web is an auxiliary HTTP access path for sessions and should preserve MCP access semantics.
-
-For web session endpoints (`/sessions/...`):
-
-- Auth is accepted from header only:
-
-```http
-Authorization: Bearer <JWT_TOKEN>
-```
-
-- Query parameter auth is not supported.
-- If token includes multiple groups, group index `0` is the primary group.
-
-### Token Expiry
-
-Token expiry and validation behavior are handled by `gofr_common` auth services.
-
-## Security Defaults
-
-### SSRF Protection
-
-Outgoing URL fetches are validated to block private/internal targets.
-
-Blocked by default:
-
-- RFC1918 IPv4 ranges (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`)
-- loopback/link-local and metadata-like targets
-- equivalent IPv6 private/link-local/loopback ranges
-
-When blocked, tools return `SSRF_BLOCKED`.
-
-### Robots.txt Enforcement
-
-- `robots.txt` is always respected.
-- There is no tool option to disable `robots.txt` checks.
-
-### Inbound Rate Limiting
-
-MCP tool calls are protected by an inbound rate limiter.
-
-Environment variables:
-
-- `GOFR_DIG_RATE_LIMIT_CALLS` (default: `60`)
-- `GOFR_DIG_RATE_LIMIT_WINDOW` in seconds (default: `60`)
-
-When exceeded, tools return `RATE_LIMIT_EXCEEDED`.
-
-## Behavior Notes
-
-### Session-Scoped Settings
-
-`set_antidetection` updates scraping settings that persist for the active MCP server process/session context and affect subsequent fetch tools.
-
-### Response Size Control
-
-`max_response_chars` is a character limit (not token limit). Large inline content is truncated by character count.
-
-### Response Type Contract
-
-`get_content` responses include:
-
-- `response_type: "inline"` when content is returned directly
-- `response_type: "session"` when server stores content and returns `session_id`
-
-### Base URL Auto-Detection
-
-`get_session_urls` can auto-detect base URL from `GOFR_DIG_WEB_URL`.
-
-If not set, fallback host/port inference can be fragile in containerized/proxy setups. For deterministic links, provide `base_url` explicitly or set `GOFR_DIG_WEB_URL`.
-
-## Commands
-
-### `ping`
-Checks if the service is running.
-
-Returns:
-
-- `{"status":"ok","service":"gofr-dig"}`
+See **[Workflow Guide](workflow.md)** for typical usage patterns.
 
 ---
 
-### `set_antidetection`
-Configures scraping profile and request behavior.
+## ping
 
-Parameters:
+Health check. Returns `{status: "ok", service: "gofr-dig"}` when the server is reachable.
+Call this first to verify connectivity before making scraping requests.
 
-- `profile` (string, required):
-  - `balanced` (default)
-  - `stealth`
-  - `browser_tls`
-  - `none`
-  - `custom`
-- `custom_headers` (object, optional): used with `profile="custom"`
-- `custom_user_agent` (string, optional): used with `profile="custom"`
-- `rate_limit_delay` (number, optional): seconds between outbound requests (`0` to `60`, default `1.0`)
-- `max_response_chars` (integer, optional): response size cap (`4000` to `4000000`, default `400000`)
-- `auth_token` (string, optional)
-
-Notes:
-
-- `robots.txt` is always enforced.
-- `max_response_chars` applies to downstream content-returning tools.
+**Parameters:** none
 
 ---
 
-### `get_content`
-Fetches page content (single page or recursive crawl).
+## set_antidetection
 
-Parameters:
+Configure anti-detection settings BEFORE calling `get_content` or `get_structure`.
+Settings persist for the remainder of this MCP session.
 
-- `url` (string, required)
-- `depth` (integer, optional): `1` to `3` (default `1`)
-- `max_pages_per_level` (integer, optional): `1` to `20` (default `5`)
-- `selector` (string, optional): extract only matching section
-- `include_links` (boolean, optional, default `true`)
-- `include_images` (boolean, optional, default `false`)
-- `include_meta` (boolean, optional, default `true`)
-- `filter_noise` (boolean, optional, default `true`)
-- `session` (boolean, optional, default `false`): control session storage. `true` stores results server-side and returns a `session_id`. `false` (default) returns all content inline. Parameters are honored exactly — no auto-override.
-- `chunk_size` (integer, optional): chunk size used when session storage is active
-- `max_bytes` (integer, optional, default `5242880`): maximum inline response size in bytes. Returns `CONTENT_TOO_LARGE` if exceeded.
-- `timeout_seconds` (number, optional): fetch timeout per URL (default `60`)
-- `auth_token` (string, optional)
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| profile | string | yes | — | One of `balanced`, `stealth`, `browser_tls`, `none`, `custom`. Start with `balanced`; escalate to `stealth` or `browser_tls` if you get FETCH_ERROR or empty content. |
+| custom_headers | object | no | — | Custom HTTP headers (only with `profile=custom`). Example: `{"Accept-Language": "en-US"}` |
+| custom_user_agent | string | no | — | Custom User-Agent string (only with `profile=custom`). |
+| rate_limit_delay | number | no | 1.0 | Seconds between requests (range 0–60). Increase if you see rate-limit errors. |
+| max_response_chars | integer | no | 400000 | Max response size in characters (range 4000–4000000). |
+| auth_token | string | no | — | JWT token for authentication. |
 
-Response behavior:
+**Returns:** `{success, profile, rate_limit_delay, max_response_chars}`
 
-- Returns `response_type="inline"` for direct content (default).
-- Returns `response_type="session"` with `session_id` when `session=true`.
-- All parameters are honored exactly as sent — no auto-overrides.
-
-Chunk size guidance:
-
-- Recommended `chunk_size`: `3000`–`8000` chars
-- Good default: `4000`
-- Smaller chunks improve incremental processing but increase total chunk count.
+**Errors:** INVALID_PROFILE, INVALID_RATE_LIMIT, INVALID_MAX_RESPONSE_CHARS
 
 ---
 
-### `get_structure`
-Analyzes layout without extracting full text.
+## get_content
 
-Parameters:
+Fetch a web page and extract its readable text. This is the primary scraping tool.
 
-- `url` (string, required)
-- `selector` (string, optional): scope structural analysis to a section
-- `include_navigation` (boolean, optional, default `true`)
-- `include_internal_links` (boolean, optional, default `true`)
-- `include_external_links` (boolean, optional, default `true`)
-- `include_forms` (boolean, optional, default `true`)
-- `include_outline` (boolean, optional, default `true`)
-- `timeout_seconds` (number, optional): fetch timeout per URL (default `60`)
-- `auth_token` (string, optional)
+### Parameters
 
----
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| url | string | yes | — | Full URL to fetch (must start with `http://` or `https://`). |
+| depth | integer | no | 1 | Crawl depth (1–3). 1 = single page. 2 = page + linked pages. 3 = two levels of links. |
+| max_pages_per_level | integer | no | 5 | Max pages fetched per depth level (1–20). |
+| selector | string | no | — | CSS selector to extract only matching elements (e.g. `#main-content`, `article`). |
+| include_links | boolean | no | true | Include extracted hyperlinks in the result. |
+| include_images | boolean | no | false | Include image URLs and alt text. |
+| include_meta | boolean | no | true | Include page metadata (description, keywords, Open Graph). |
+| session | boolean | no | false | `true` = store server-side, return `session_id`. `false` = inline. |
+| filter_noise | boolean | no | true | Strip ad/cookie-banner noise from extracted text. |
+| chunk_size | integer | no | 4000 | Session chunk size in characters. Only used with `session=true`. |
+| max_bytes | integer | no | 5242880 | Max inline response size in bytes (5 MB). |
+| timeout_seconds | number | no | 60 | Per-request fetch timeout in seconds. |
+| parse_results | boolean | no | true | Run the deterministic news parser on crawl results. Returns structured stories with dedup, classification, and quality signals. Applies to all depths. |
+| source_profile_name | string | no | — | Source profile for the parser (e.g. `scmp`). Controls site-specific date patterns, section labels, and noise markers. Only used when `parse_results=true`. |
+| auth_token | string | no | — | JWT token for authentication. |
 
-### `get_session_info`
-Gets metadata for a stored scraping session.
+### Depth Behaviour
 
-Parameters:
+- **depth=1** — scrape a single page.
+- **depth=2** — scrape the page AND the pages it links to.
+- **depth=3** — three levels deep (slow, use sparingly).
 
-- `session_id` (string, required)
-- `auth_token` (string, optional)
+### Session Mode
 
----
+- `session=true` — store results server-side, return a `session_id`. Retrieve later with `get_session`, `get_session_chunk`, or `get_session_urls`.
+- `session=false` (default) — return all content inline.
 
-### `get_session_chunk`
-Retrieves one chunk from a stored session.
+### Parse Mode
 
-Parameters:
+- `parse_results=true` (default) — crawl results are processed by the deterministic news parser. Returns `{feed_meta, stories}` with deduplicated articles, section labels, date extraction, and parse-quality signals. Applies to all depths.
+- `parse_results=false` — returns raw crawl output (pages, text, links, etc.).
+- Use `source_profile_name` (e.g. `scmp`) for site-specific parsing rules. Omit for the generic fallback profile.
 
-- `session_id` (string, required)
-- `chunk_index` (integer, required)
-- `auth_token` (string, optional)
+### Tips
 
----
+- Call `get_structure` first to find a good CSS selector, then pass it as `selector`.
+- Use `include_links=false` and `include_meta=false` if you only need text.
+- If you get ROBOTS_BLOCKED, choose a URL/path allowed by `robots.txt`.
+- If you get FETCH_ERROR, try `set_antidetection` with `profile=stealth` or `browser_tls`.
 
-### `list_sessions`
-Lists stored sessions accessible to the resolved group/public scope.
-
-Parameters:
-
-- `auth_token` (string, optional)
-
----
-
-### `get_session_urls`
-Returns chunk references as JSON descriptors or plain HTTP URLs.
-
-Parameters:
-
-- `session_id` (string, required)
-- `as_json` (boolean, optional, default `true`)
-- `base_url` (string, optional): used when `as_json=false`
-- `auth_token` (string, optional)
+**Errors:** INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR, MAX_DEPTH_EXCEEDED, MAX_PAGES_EXCEEDED, PARSE_ERROR, CONTENT_TOO_LARGE
 
 ---
 
-### `get_session`
-Retrieves all chunks joined into one text payload.
+## get_structure
 
-Parameters:
+Analyze a web page's structure WITHOUT extracting full text.
+Use this BEFORE `get_content` to discover the page layout and find CSS selectors.
 
-- `session_id` (string, required)
-- `max_bytes` (integer, optional, default `5242880`)
-- `timeout_seconds` (number, optional, default `60`): timeout for retrieving and joining chunks
-- `auth_token` (string, optional)
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| url | string | yes | — | Full URL to analyze (must include `http://` or `https://`). |
+| selector | string | no | — | CSS selector to scope the analysis to a specific part of the page. |
+| include_navigation | boolean | no | true | Include navigation menus and their links. |
+| include_internal_links | boolean | no | true | Include links to same domain. |
+| include_external_links | boolean | no | true | Include links to other domains. |
+| include_forms | boolean | no | true | Include HTML forms with their fields and actions. |
+| include_outline | boolean | no | true | Include heading hierarchy (h1–h6) as an outline. |
+| timeout_seconds | number | no | 60 | Per-request fetch timeout in seconds. |
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns:** `{success, url, title, language, sections, navigation, internal_links, external_links, forms, outline}`
+
+**Errors:** INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR
+
+---
+
+## get_session_info
+
+Get metadata for a stored scraping session.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| session_id | string | yes | — | Session GUID returned by `get_content` when `session=true`. |
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns:** `{success, session_id, url, total_chunks, total_size, created_at}`
+
+**Errors:** SESSION_NOT_FOUND
+
+---
+
+## get_session_chunk
+
+Retrieve one chunk of text from a stored session.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| session_id | string | yes | — | Session GUID from a previous `get_content` call. |
+| chunk_index | integer | yes | — | Zero-based chunk index (0 to `total_chunks-1`). |
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns:** `{success, session_id, chunk_index, total_chunks, content}`
+
+**Tip:** Prefer `get_session` if you need all chunks at once and the total size is under 5 MB.
+
+**Errors:** SESSION_NOT_FOUND, CHUNK_NOT_FOUND
+
+---
+
+## list_sessions
+
+List all stored scraping sessions. Returns an empty list when no sessions exist.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns:** `{success, sessions: [{session_id, url, total_chunks, total_size, created_at}], total}`
+
+---
+
+## get_session_urls
+
+Get references to every chunk in a session.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| session_id | string | yes | — | Session GUID from a previous `get_content` call. |
+| as_json | boolean | no | true | `true` = list of `{session_id, chunk_index}` objects. `false` = list of plain HTTP URLs. |
+| base_url | string | no | — | Override the web-server base URL (e.g. `http://myhost:PORT`). Only used when `as_json=false`. |
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns (as_json=true):** `{success, session_id, url, total_chunks, chunks: [{session_id, chunk_index}, ...]}`
+
+**Returns (as_json=false):** `{success, session_id, url, total_chunks, chunk_urls: [url, ...]}`
+
+**Errors:** SESSION_NOT_FOUND
+
+---
+
+## get_session
+
+Retrieve and join ALL chunks of a session into a single text response.
+Preferred over iterating `get_session_chunk` when you need the full content.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| session_id | string | yes | — | Session GUID from a previous `get_content` call. |
+| max_bytes | integer | no | 5242880 | Max allowed size in bytes. Returns error if session exceeds limit. |
+| timeout_seconds | number | no | 60 | Timeout in seconds for retrieval. |
+| auth_token | string | no | — | JWT token for authentication. |
+
+**Returns:** `{success, session_id, url, total_chunks, total_size, content}`
+
+**Errors:** SESSION_NOT_FOUND, CONTENT_TOO_LARGE
+
+---
 
 ## Error Codes
 
-Standard MCP-style error shape:
+Every error response includes `{success: false, error_code, error, recovery_strategy}`.
+The `recovery_strategy` field provides actionable guidance.
 
-```json
-{
-  "success": false,
-  "error_code": "SOME_CODE",
-  "message": "Human-readable message",
-  "details": {},
-  "recovery_strategy": "How to fix"
-}
-```
-
-### Full Error Table
-
-| Error Code | Meaning | Typical Recovery |
-|---|---|---|
-| `INVALID_URL` | Missing/invalid URL | Use full `http://` or `https://` URL |
-| `URL_NOT_FOUND` | Target returned 404 | Verify URL exists |
-| `FETCH_ERROR` | Generic fetch failure | Retry and verify target availability |
-| `TIMEOUT_ERROR` | Request timed out | Increase timeout or retry later |
-| `CONNECTION_ERROR` | DNS/network/connectivity failure | Verify hostname/network |
-| `ROBOTS_BLOCKED` | Access denied by robots rules | Choose allowed URL/path |
-| `ACCESS_DENIED` | Target denied request | Adjust profile/headers |
-| `RATE_LIMITED` | Outbound target rate-limited | Increase `rate_limit_delay` |
-| `RATE_LIMIT_EXCEEDED` | Inbound MCP call rate limit exceeded | Wait for reset window |
-| `SSRF_BLOCKED` | URL resolved to private/internal target | Use public target URL |
-| `SELECTOR_NOT_FOUND` | Selector matched no elements | Validate selector against page structure |
-| `INVALID_SELECTOR` | Invalid CSS selector syntax | Fix selector syntax |
-| `EXTRACTION_ERROR` | Content/structure parsing failed | Retry with different selector/profile |
-| `ENCODING_ERROR` | Character encoding issue | Retry with simpler extraction path |
-| `INVALID_PROFILE` | Unknown anti-detection profile | Use supported profile values |
-| `INVALID_HEADERS` | Malformed custom headers | Provide string key/value pairs |
-| `INVALID_RATE_LIMIT` | Invalid `rate_limit_delay` value | Use non-negative seconds |
-| `MAX_DEPTH_EXCEEDED` | Crawl depth beyond supported max | Use depth up to `3` |
-| `MAX_PAGES_EXCEEDED` | Pages-per-level too high | Reduce `max_pages_per_level` |
-| `UNKNOWN_TOOL` | Tool name not found | Call a listed tool |
-| `INVALID_ARGUMENT` | Missing/invalid argument | Match tool input schema |
-| `INVALID_MAX_RESPONSE_CHARS` | Invalid size cap | Use `4000` to `4000000` |
-| `AUTH_ERROR` | Invalid/expired token | Provide valid JWT |
-| `PERMISSION_DENIED` | Cross-group/session access denied | Use token for owning group |
-| `SESSION_ERROR` | Session operation failed | Verify session exists and scope is correct |
-| `SESSION_NOT_FOUND` | Session id not found | Use `list_sessions` or create a new session |
-| `INVALID_CHUNK_INDEX` | Chunk index out of range | Check `total_chunks` via `get_session_info` |
-| `CONFIGURATION_ERROR` | Server config issue | Check deployment/env configuration |
-| `CONTENT_TOO_LARGE` | Joined session exceeds `max_bytes` | Use chunked retrieval instead |
+| Error Code | Recovery Strategy |
+|------------|-------------------|
+| INVALID_URL | Ensure the URL is properly formatted with `http://` or `https://` scheme. |
+| URL_NOT_FOUND | Verify the URL exists and is accessible. The server returned 404. |
+| FETCH_ERROR | Check network connectivity and that the target site is online. Try again later. |
+| TIMEOUT_ERROR | The request timed out. Try increasing timeout or check if the site is slow/unresponsive. |
+| CONNECTION_ERROR | Could not connect to the server. Verify the URL and check network connectivity. |
+| ROBOTS_BLOCKED | Access blocked by `robots.txt`. Choose a URL/path allowed by the target site's robots policy. |
+| ACCESS_DENIED | The server denied access. Try a different anti-detection profile or custom headers. |
+| RATE_LIMITED | Too many requests. Increase `rate_limit_delay` in `set_antidetection`. |
+| RATE_LIMIT_EXCEEDED | Inbound rate limit exceeded. Wait and retry after the reset window. |
+| SSRF_BLOCKED | The URL resolves to a private/internal IP. Requests to internal networks are blocked. |
+| SELECTOR_NOT_FOUND | The CSS selector matched no elements. Verify the selector syntax and that the element exists. |
+| INVALID_SELECTOR | The CSS selector syntax is invalid. Check for typos. |
+| EXTRACTION_ERROR | Failed to extract content. The page may have unexpected structure or encoding. |
+| ENCODING_ERROR | Character encoding issue. The page may use an unsupported encoding. |
+| INVALID_PROFILE | Use one of: `stealth`, `balanced`, `none`, `custom`, `browser_tls`. |
+| INVALID_HEADERS | Custom headers must be a dictionary with string keys and values. |
+| INVALID_RATE_LIMIT | `rate_limit_delay` must be a non-negative number (seconds between requests). |
+| INVALID_MAX_RESPONSE_CHARS | `max_response_chars` must be between 4000 and 4000000. Default is 400000. |
+| MAX_DEPTH_EXCEEDED | Crawl depth is limited to 3. Use depth 1, 2, or 3. |
+| MAX_PAGES_EXCEEDED | Too many pages requested. Reduce `max_pages_per_level` (max 20). |
+| CONTENT_TOO_LARGE | Response exceeds `max_bytes`. Use `session=true` or increase `max_bytes`. |
+| AUTH_ERROR | Provide a valid JWT token in `auth_token`. |
+| PERMISSION_DENIED | Your token's groups do not include the group that owns this session. |
+| SESSION_ERROR | Session operation failed. Use `list_sessions` to check available sessions. |
+| SESSION_NOT_FOUND | Session ID not found. Use `list_sessions` to discover sessions, or create one with `get_content(session=true)`. |
+| INVALID_CHUNK_INDEX | Chunk index out of range. Use `get_session_info` to check the total number of chunks. |
+| INVALID_ARGUMENT | A required argument is missing or invalid. Check the tool schema. |
+| PARSE_ERROR | The news parser failed. Retry with `parse_results=false` for raw output, or check `source_profile_name`. |
+| CONFIGURATION_ERROR | Check server configuration. Contact administrator if issue persists. |
+| UNKNOWN_TOOL | Use one of the tools listed in this reference. |

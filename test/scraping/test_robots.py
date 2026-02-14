@@ -359,7 +359,7 @@ class TestRobotsComplianceInTools:
 
         # Try to access disallowed path
         url = html_fixture_server.get_url("admin/secret.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "error" in data
@@ -376,7 +376,7 @@ class TestRobotsComplianceInTools:
 
         # Access would-be disallowed path (will 404, but not blocked by robots)
         url = html_fixture_server.get_url("admin/secret.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         # Should get 404 error, not robots blocked
@@ -425,7 +425,7 @@ class TestRobotsComplianceInTools:
 
         # Access allowed path
         url = html_fixture_server.get_url("products.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "error" not in data

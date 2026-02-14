@@ -66,14 +66,14 @@ class TestDepthCrawling:
         url = html_fixture_server.get_url("index.html")
 
         # Default call (no depth parameter)
-        result_default = await handle_call_tool("get_content", {"url": url})
+        result_default = await handle_call_tool("get_content", {"url": url, "parse_results": False})
         data_default = get_mcp_result_data(result_default)
 
         # Reset state for second call
         reset_scraping_state()
 
         # Explicit depth=1
-        result_depth1 = await handle_call_tool("get_content", {"url": url, "depth": 1})
+        result_depth1 = await handle_call_tool("get_content", {"url": url, "depth": 1, "parse_results": False})
         data_depth1 = get_mcp_result_data(result_depth1)
 
         # Both should have same structure (inline content, no session_id)
@@ -92,6 +92,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 3,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -114,6 +115,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 3,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -136,6 +138,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 3,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -159,6 +162,7 @@ class TestDepthCrawling:
             "depth": 3,
             "max_pages_per_level": 3,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -184,6 +188,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 3,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -209,6 +214,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 2,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -232,6 +238,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 2,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -251,6 +258,7 @@ class TestDepthCrawling:
             "depth": 3,
             "max_pages_per_level": 5,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -269,6 +277,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 5,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -286,6 +295,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 3,
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -305,6 +315,7 @@ class TestDepthCrawling:
         result = await handle_call_tool("get_content", {
             "url": url,
             "depth": 0,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -321,6 +332,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 10,
             "max_pages_per_level": 2,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -337,6 +349,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 0,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -356,6 +369,7 @@ class TestDepthCrawling:
             "max_pages_per_level": 2,
             "selector": "#content",
             "session": True,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -392,6 +406,7 @@ class TestDepthCrawlingEdgeCases:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 5,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 
@@ -406,6 +421,7 @@ class TestDepthCrawlingEdgeCases:
         result = await handle_call_tool("get_content", {
             "url": "http://127.0.0.1:9999/nonexistent.html",
             "depth": 2,
+            "parse_results": False,
         })
         data = get_mcp_result_data(result)
 

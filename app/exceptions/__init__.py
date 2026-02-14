@@ -58,6 +58,23 @@ except ImportError:
     SessionValidationError = type("SessionValidationError", (ValidationError,), {})  # type: ignore[misc, assignment]
     InvalidSessionStateError = type("InvalidSessionStateError", (ValidationError,), {})  # type: ignore[misc, assignment]
 
+try:
+    from app.exceptions.news_parser import (
+        NewsParserError,
+        CrawlInputError,
+        SourceProfileError,
+        DateParseError,
+        SegmentationError,
+        DeduplicationError,
+    )
+except ImportError:
+    NewsParserError = type("NewsParserError", (GofrError,), {})  # type: ignore[misc, assignment]
+    CrawlInputError = type("CrawlInputError", (ValidationError,), {})  # type: ignore[misc, assignment]
+    SourceProfileError = type("SourceProfileError", (ValidationError,), {})  # type: ignore[misc, assignment]
+    DateParseError = type("DateParseError", (GofrError,), {})  # type: ignore[misc, assignment]
+    SegmentationError = type("SegmentationError", (GofrError,), {})  # type: ignore[misc, assignment]
+    DeduplicationError = type("DeduplicationError", (GofrError,), {})  # type: ignore[misc, assignment]
+
 __all__ = [
     # Base exceptions (from gofr_common)
     "GofrError",
@@ -77,5 +94,12 @@ __all__ = [
     "SessionNotFoundError",
     "SessionValidationError",
     "InvalidSessionStateError",
+    # News parser exceptions
+    "NewsParserError",
+    "CrawlInputError",
+    "SourceProfileError",
+    "DateParseError",
+    "SegmentationError",
+    "DeduplicationError",
 ]
 

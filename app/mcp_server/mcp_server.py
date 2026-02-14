@@ -509,13 +509,19 @@ async def handle_list_tools() -> List[Tool]:
                 "Use get_session(session_id) or get_session_chunk(session_id, chunk_index) to retrieve content.\n"
                 "- session=false (default): return all content inline.\n"
                 "All parameters are honored exactly as sent — no auto-overrides.\n\n"
+                "PARSE MODE:\n"
+                "- parse_results=true (default): crawl results are processed "
+                "by the deterministic news parser. Returns structured stories with dedup, classification, "
+                "and parse quality signals.\n"
+                "- parse_results=false: returns raw crawl output (pages, text, links, etc).\n"
+                "- Applies to all depths. For depth=1 the single page is wrapped and parsed.\n\n"
                 "TIPS:\n"
                 "- Call get_structure first to find a good CSS selector, then pass it as 'selector'.\n"
                 "- Use include_links=false and include_meta=false if you only need text.\n"
                 "- If you get ROBOTS_BLOCKED, choose a URL/path allowed by robots.txt.\n"
                 "- If you get FETCH_ERROR, try set_antidetection with profile='stealth' or 'browser_tls'.\n\n"
                 "Errors: INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR, "
-                "MAX_DEPTH_EXCEEDED, MAX_PAGES_EXCEEDED."
+                "MAX_DEPTH_EXCEEDED, MAX_PAGES_EXCEEDED, PARSE_ERROR."
             ),
             inputSchema={
                 "type": "object",
@@ -599,6 +605,25 @@ async def handle_list_tools() -> List[Tool]:
                         "description": "Per-request fetch timeout in seconds (default 60).",
                         "minimum": 1,
                         "default": 60,
+                    },
+                    "parse_results": {
+                        "type": "boolean",
+                        "description": (
+                            "Run the deterministic news parser on crawl results. "
+                            "Returns a structured feed with deduplicated stories, sections, "
+                            "provenance, and parse-quality signals instead of raw page data. "
+                            "Applies to all depths. Default true."
+                        ),
+                        "default": True,
+                    },
+                    "source_profile_name": {
+                        "type": "string",
+                        "description": (
+                            "Source profile for the news parser (e.g. 'scmp'). "
+                            "Controls site-specific date patterns, section labels, "
+                            "and noise markers. Omit to use the generic fallback "
+                            "profile. Only used when parse_results=true."
+                        ),
                     },
                     **AUTH_TOKEN_SCHEMA,
                 },
@@ -1098,6 +1123,8 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     chunk_size = arguments.get("chunk_size")
     max_bytes = arguments.get("max_bytes", 5_242_880)  # 5 MB default
     timeout_seconds = arguments.get("timeout_seconds", 60)
+    parse_results = arguments.get("parse_results", True)
+    source_profile_name = arguments.get("source_profile_name")
 
     # When crawling (depth > 1), always extract links internally so we can
     # discover sub-pages.  The caller's include_links preference only controls
@@ -1240,6 +1267,41 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         if page_data is None:
             return [_json_text({"success": False, "error": "URL already visited"})]
 
+        # Run news parser if requested
+        if parse_results and page_data.get("success", True):
+            try:
+                from datetime import datetime, timezone
+
+                from app.processing.news_parser import NewsParser
+
+                parser_input = {
+                    "start_url": url,
+                    "pages": [page_data],
+                    "crawl_time_utc": datetime.now(timezone.utc)
+                    .isoformat()
+                    .replace("+00:00", "Z"),
+                    "parser_version": "1.0.0",
+                }
+                if source_profile_name:
+                    parser_input["source_profile_name"] = source_profile_name
+
+                parser = NewsParser()
+                parsed = parser.parse(parser_input)
+                parsed["crawl_depth"] = depth
+                page_data = parsed
+            except Exception as exc:
+                logger.error(
+                    "news_parser_failed",
+                    error=str(exc),
+                    url=url,
+                    depth=depth,
+                )
+                return _error_response(
+                    "PARSE_ERROR",
+                    f"News parser failed: {exc}",
+                    {"url": url, "depth": depth},
+                )
+
         # Handle session storage if requested
         if use_session:
             # Strip links before storing if caller didn't ask for them
@@ -1292,13 +1354,15 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                     "SESSION_ERROR", f"Failed to create session: {e}", {"url": url}
                 )
 
-        # Strip links the caller didn't ask for (they were only kept for crawling)
-        if not include_links:
+        # Strip links the caller didn't ask for (raw mode only — parsed output has no links key)
+        if not include_links and not parse_results:
             page_data.pop("links", None)
 
-        # Apply character limit truncation
+        # Apply character limit truncation (raw mode only)
         state = get_scraping_state()
-        page_data, truncated = _apply_char_limit(page_data, state.max_response_chars)
+        truncated = False
+        if not parse_results:
+            page_data, truncated = _apply_char_limit(page_data, state.max_response_chars)
 
         page_data["response_type"] = "inline"
 
@@ -1431,13 +1495,48 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
         results["summary"]["pages_by_depth"]["3"] = depth_3_count
 
+    # Save crawl summary before potential parser replacement
+    crawl_summary = results.get("summary", {})
+
+    # Run news parser on multi-page results if requested
+    if parse_results:
+        try:
+            from datetime import datetime, timezone
+
+            from app.processing.news_parser import NewsParser
+
+            results["crawl_time_utc"] = (
+                datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            )
+            results["parser_version"] = "1.0.0"
+            if source_profile_name:
+                results["source_profile_name"] = source_profile_name
+
+            parser = NewsParser()
+            parsed = parser.parse(results)
+            parsed["raw_summary"] = crawl_summary
+            parsed["crawl_depth"] = depth
+            results = parsed
+        except Exception as exc:
+            logger.error(
+                "news_parser_failed",
+                error=str(exc),
+                url=url,
+                depth=depth,
+            )
+            return _error_response(
+                "PARSE_ERROR",
+                f"News parser failed: {exc}",
+                {"url": url, "depth": depth},
+            )
+
     # Apply token limit truncation to multi-page results
     state = get_scraping_state()
 
     # Handle session storage if requested (same as depth=1)
     if use_session:
-        # Strip links before storing if caller didn't ask for them
-        if not include_links:
+        # Strip links before storing if caller didn't ask for them (raw mode only)
+        if not include_links and not parse_results:
             results.pop("links", None)
             for page in results.get("pages", []):
                 page.pop("links", None)
@@ -1475,7 +1574,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                         "chunk_size": info["chunk_size"],
                         "created_at": info["created_at"],
                         "crawl_depth": depth,
-                        "total_pages": results["summary"]["total_pages"],
+                        "total_pages": crawl_summary.get("total_pages", 0),
                     }
                 )
             ]
@@ -1485,14 +1584,18 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
             logger.error("Failed to create session", error=str(e), url=url)
             return _error_response("SESSION_ERROR", f"Failed to create session: {e}", {"url": url})
 
-    # Strip links the caller didn't ask for (they were only kept for crawling)
-    if not include_links:
+    # Strip links the caller didn't ask for (raw mode only — parsed output has no pages/links)
+    if not include_links and not parse_results:
         results.pop("links", None)
         for page in results.get("pages", []):
             page.pop("links", None)
 
     results["response_type"] = "inline"
-    results, truncated = _apply_char_limit_multipage(results, state.max_response_chars)
+
+    # Apply char limit truncation only to raw crawl results (parsed output has different shape)
+    truncated = False
+    if not parse_results:
+        results, truncated = _apply_char_limit_multipage(results, state.max_response_chars)
 
     # Enforce max_bytes limit on serialized response
     serialized = json.dumps(results)
@@ -1505,11 +1608,11 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 f"Use session=true to store content server-side, "
                 f"or increase max_bytes."
             ),
-            {"url": url, "max_bytes": max_bytes, "total_pages": results["summary"]["total_pages"]},
+            {"url": url, "max_bytes": max_bytes, "total_pages": crawl_summary.get("total_pages", 0)},
         )
 
-    total_p = results["summary"]["total_pages"]
-    total_t = results["summary"]["total_text_length"]
+    total_p = crawl_summary.get("total_pages", 0)
+    total_t = crawl_summary.get("total_text_length", 0)
     logger.info(
         f"crawl.done {crawl_host} — {total_p} pages, {total_t:,} chars, depth={depth}"
         + (" [truncated]" if truncated else ""),

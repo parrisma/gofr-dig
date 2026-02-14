@@ -74,6 +74,33 @@ Follow links to download a set of pages (e.g., specific documentation).
 
 **Note**: Large results (like multi-page crawls) are stored as a **Session**. The tool will return a `session_id` instead of the full text.
 
+### Parse Mode (News Parser)
+
+By default (`parse_results=true`) the deterministic news parser runs on crawl
+results at any depth. This produces a structured feed with deduplicated stories,
+section labels, date extraction, and parse-quality signals — ready for downstream
+LLM analysis.
+
+```json
+{
+  "url": "https://www.scmp.com/business",
+  "depth": 2,
+  "source_profile_name": "scmp"
+}
+```
+
+The result contains `feed_meta` (parser stats) and `stories` (structured articles)
+instead of raw page data.
+
+To get raw crawl output instead, set `parse_results` to `false`:
+
+```json
+{
+  "url": "https://example.com/article",
+  "parse_results": false
+}
+```
+
 ---
 
 ## 4. Retrieve Session Results

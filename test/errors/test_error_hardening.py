@@ -212,7 +212,7 @@ class TestMCPToolErrorCodes:
     async def test_get_content_missing_url_returns_invalid_url(self):
         from app.mcp_server.mcp_server import handle_call_tool
 
-        result = await handle_call_tool("get_content", {})
+        result = await handle_call_tool("get_content", {"parse_results": False})
         data = get_mcp_result_data(result)
         assert data["error_code"] == "INVALID_URL"
         assert "recovery_strategy" in data
@@ -317,6 +317,7 @@ class TestRecoveryStrategiesCoverage:
         "INVALID_CHUNK_INDEX",   # Emitted by exception .code, not _error_response
         "SESSION_NOT_FOUND",     # Emitted by exception .code, not _error_response
         "CONFIGURATION_ERROR",   # Reserved for startup config errors
+        "PARSE_ERROR",           # Emitted in _handle_get_content parser block
     }
 
     ALL_REACHABLE = DIRECTLY_EMITTED | FETCH_CLASSIFIED | EXTRACTION_CLASSIFIED

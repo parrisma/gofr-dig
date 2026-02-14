@@ -75,7 +75,7 @@ class TestWebResearchWorkflow:
 
                 # Step 2: Get content from products page
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/products.html"}
+                    "get_content", {"url": f"{base_url}/products.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -109,7 +109,7 @@ class TestWebResearchWorkflow:
 
                 # Step 2: Now fetch content with stealth settings active
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/products.html"}
+                    "get_content", {"url": f"{base_url}/products.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -140,7 +140,7 @@ class TestWebResearchWorkflow:
                 # Step 2: Use selector to get specific content
                 content_result = await session.call_tool(
                     "get_content",
-                    {"url": f"{base_url}/products.html", "selector": ".product-card"},
+                    {"url": f"{base_url}/products.html", "selector": ".product-card", "parse_results": False},
                 )
                 content = parse_json(content_result)
                 assert content["success"] is True
@@ -170,7 +170,7 @@ class TestMultiLanguageWorkflow:
 
                 # Get content
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/chinese.html"}
+                    "get_content", {"url": f"{base_url}/chinese.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -189,7 +189,7 @@ class TestMultiLanguageWorkflow:
                 await session.initialize()
 
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/japanese.html"}
+                    "get_content", {"url": f"{base_url}/japanese.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -221,7 +221,7 @@ class TestRobotsComplianceWorkflow:
 
                 # Try to access /admin/ path (blocked by robots.txt)
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/admin/secret.html"}
+                    "get_content", {"url": f"{base_url}/admin/secret.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -239,7 +239,7 @@ class TestRobotsComplianceWorkflow:
 
                 # Access public pages (allowed)
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/products.html"}
+                    "get_content", {"url": f"{base_url}/products.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -264,7 +264,7 @@ class TestRobotsComplianceWorkflow:
 
                 # /admin/ should still be blocked by robots
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/admin/page.html"}
+                    "get_content", {"url": f"{base_url}/admin/page.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -349,7 +349,7 @@ class TestErrorHandlingWorkflow:
                 await session.initialize()
 
                 content_result = await session.call_tool(
-                    "get_content", {"url": f"{base_url}/nonexistent-page.html"}
+                    "get_content", {"url": f"{base_url}/nonexistent-page.html", "parse_results": False}
                 )
                 content = parse_json(content_result)
 
@@ -368,7 +368,7 @@ class TestErrorHandlingWorkflow:
 
                 content_result = await session.call_tool(
                     "get_content",
-                    {"url": f"{base_url}/index.html", "selector": "[[[invalid"},
+                    {"url": f"{base_url}/index.html", "selector": "[[[invalid", "parse_results": False},
                 )
                 content = parse_json(content_result)
 
@@ -383,7 +383,7 @@ class TestErrorHandlingWorkflow:
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                content_result = await session.call_tool("get_content", {})
+                content_result = await session.call_tool("get_content", {"parse_results": False})
                 content = parse_json(content_result)
 
                 assert content["success"] is False
@@ -433,7 +433,7 @@ class TestFullScrapingPipeline:
                 for page in pages_to_analyze:
                     try:
                         content_result = await session.call_tool(
-                            "get_content", {"url": f"{base_url}{page}"}
+                            "get_content", {"url": f"{base_url}{page}", "parse_results": False}
                         )
                         content = parse_json(content_result)
 
@@ -471,7 +471,7 @@ class TestFullScrapingPipeline:
 
                 for page in pages:
                     content_result = await session.call_tool(
-                        "get_content", {"url": f"{base_url}{page}"}
+                        "get_content", {"url": f"{base_url}{page}", "parse_results": False}
                     )
                     content = parse_json(content_result)
 
@@ -572,7 +572,7 @@ class TestContentExtractionOptions:
 
                 result = await session.call_tool(
                     "get_content",
-                    {"url": f"{base_url}/index.html", "include_links": True},
+                    {"url": f"{base_url}/index.html", "include_links": True, "parse_results": False},
                 )
                 content = parse_json(result)
 
@@ -591,7 +591,7 @@ class TestContentExtractionOptions:
 
                 result = await session.call_tool(
                     "get_content",
-                    {"url": f"{base_url}/index.html", "include_links": False},
+                    {"url": f"{base_url}/index.html", "include_links": False, "parse_results": False},
                 )
                 content = parse_json(result)
 
@@ -611,7 +611,7 @@ class TestContentExtractionOptions:
 
                 result = await session.call_tool(
                     "get_content",
-                    {"url": f"{base_url}/products.html", "include_images": True},
+                    {"url": f"{base_url}/products.html", "include_images": True, "parse_results": False},
                 )
                 content = parse_json(result)
 

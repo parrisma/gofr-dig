@@ -71,6 +71,13 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "SESSION_NOT_FOUND": "Session ID not found. Use list_sessions to discover sessions, or create one with get_content(session=true).",
     "INVALID_CHUNK_INDEX": "Chunk index out of range. Use get_session_info to check the total number of chunks.",
     
+    # Parse errors
+    "PARSE_ERROR": (
+        "The news parser failed to process the crawl results. "
+        "Retry with parse_results=false to get raw output, or check "
+        "source_profile_name for the target site."
+    ),
+
     # Configuration errors
     "CONFIGURATION_ERROR": "Check server configuration. Contact administrator if issue persists.",
 }

@@ -259,7 +259,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
 
@@ -274,7 +274,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
-        result = await handle_call_tool("get_content", {"url": url, "session": True})
+        result = await handle_call_tool("get_content", {"url": url, "session": True, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert data["success"] is True
@@ -287,7 +287,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
-        result = await handle_call_tool("get_content", {"url": url, "timeout_seconds": 0})
+        result = await handle_call_tool("get_content", {"url": url, "timeout_seconds": 0, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert data["success"] is False
@@ -299,7 +299,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("products.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "Widget Pro 3000" in data["text"]
@@ -313,7 +313,7 @@ class TestGetContentMCPTool:
         url = html_fixture_server.get_url("index.html")
         result = await handle_call_tool(
             "get_content",
-            {"url": url, "selector": "#content"},
+            {"url": url, "selector": "#content", "parse_results": False},
         )
 
         data = get_mcp_result_data(result)
@@ -326,7 +326,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("external-links.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "links" in data
@@ -340,7 +340,7 @@ class TestGetContentMCPTool:
         url = html_fixture_server.get_url("index.html")
         result = await handle_call_tool(
             "get_content",
-            {"url": url, "include_links": False},
+            {"url": url, "include_links": False, "parse_results": False},
         )
 
         data = get_mcp_result_data(result)
@@ -355,7 +355,7 @@ class TestGetContentMCPTool:
         url = html_fixture_server.get_url("product-detail.html")
         result = await handle_call_tool(
             "get_content",
-            {"url": url, "include_images": True},
+            {"url": url, "include_images": True, "parse_results": False},
         )
 
         data = get_mcp_result_data(result)
@@ -368,7 +368,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("chinese.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "欢迎" in data.get("title", "") or "欢迎" in data["text"]
@@ -380,7 +380,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("japanese.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "ようこそ" in data.get("title", "") or "ようこそ" in data["text"]
@@ -391,7 +391,7 @@ class TestGetContentMCPTool:
         """Test error when URL is missing."""
         from app.mcp_server.mcp_server import handle_call_tool
 
-        result = await handle_call_tool("get_content", {})
+        result = await handle_call_tool("get_content", {"parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "error" in data
@@ -403,7 +403,7 @@ class TestGetContentMCPTool:
 
         result = await handle_call_tool(
             "get_content",
-            {"url": "not-a-valid-url"},
+            {"url": "not-a-valid-url", "parse_results": False},
         )
 
         data = get_mcp_result_data(result)
@@ -415,7 +415,7 @@ class TestGetContentMCPTool:
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("nonexistent.html")
-        result = await handle_call_tool("get_content", {"url": url})
+        result = await handle_call_tool("get_content", {"url": url, "parse_results": False})
 
         data = get_mcp_result_data(result)
         assert "error" in data
