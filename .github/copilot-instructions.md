@@ -1,12 +1,17 @@
 # Copilot Instructions for gofr-dig
 
+## IMMUTABLE INSTRUCTIONS
+1. Always ask questions if the request requires you to make assumptions
+2. Avoid head/tail on commands as it makes it hard for user to see what is happening
+3. when ask to write something always do it in a doc if it is more than a few scentences
+4. for technical answers always reply in plain text and avoid markdown formatting
+
 ## Core Rules
 - Python 3.11. Line length 100 (Black/Ruff).
 - Use UV only: `uv run`, `uv add`. No `pip install`, no `python -m venv`.
 - Prefer `gofr_common` helpers (auth, config, storage, logging).
 - Logging: structured fields, no f-strings — `logger.info("msg", key=value)`.
 - Exceptions: use `app.exceptions` + `app.errors.mapper`.
-- Tests: pytest; shared fixtures in `test/conftest.py`.
 - Tests should be run via `./scripts/run_tests.sh`.
 - Paths: use `Config.get_storage_dir() / "subdir"`, never string paths.
 - Dev container: avoid `localhost`/`127.0.0.1` for service URLs; use container service names or the published host ports.
@@ -62,9 +67,9 @@ content = ContentExtractor(result.content, result.url).extract(selector="#main")
 
 ## Docker (prod)
 ```bash
-docker/start-prod.sh         # Start stack
-docker/start-prod.sh --build # Rebuild
-docker/start-prod.sh --down  # Stop
+scripts/start-prod.sh         # Start stack
+scripts/start-prod.sh --build # Rebuild
+scripts/start-prod.sh --down  # Stop
 ```
 
 ## Anti-Patterns
@@ -72,12 +77,6 @@ docker/start-prod.sh --down  # Stop
 - Do not use `pip install`.
 - Do not ignore robots.txt without explicit opt-out.
 - Do not use bare `except: pass`.
-
-## Docs
-- [docs/TOOLS.md](../docs/TOOLS.md)
-- [docs/SESSION_MANAGEMENT_PROPOSAL.md](../docs/SESSION_MANAGEMENT_PROPOSAL.md)
-- [docs/SESSION_REMEDIATION_PLAN.md](../docs/SESSION_REMEDIATION_PLAN.md)
-- [docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
 
 ## Logging
 - Use the **project logger** (e.g., `StructuredLogger`), **not** `print()` or default logging.

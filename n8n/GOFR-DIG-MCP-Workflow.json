@@ -1,0 +1,316 @@
+{
+  "name": "GOFR-DIG-MCP-Workflow",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        112
+      ],
+      "id": "de69bfee-4fa0-4e10-b50a-d8db10b8f751",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://gofr-dig-mcp:8070/mcp/",
+        "tool": {
+          "__rl": true,
+          "value": "get_content",
+          "mode": "list",
+          "cachedResultName": "get_content"
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "url": "https://www.scmp.com/business?module=oneline_menu_section_int&pgtype=homepage",
+            "include_images": false,
+            "include_links": false,
+            "depth": 2,
+            "session": false,
+            "auth_tokens": "[\n\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIyYjM4YmIxZi03ZWZlLTQzMTQtYjQ4YS0zNjdiY2ZkNGIxN2YiLCJncm91cHMiOlsiYXBhYy1zYWxlcyJdLCJpYXQiOjE3NzEwNDk0NjUsImV4cCI6MTc3MzY0MTQ2NSwibmJmIjoxNzcxMDQ5NDY1LCJhdWQiOiJnb2ZyLWFwaSJ9.doKPhcH90iCdDOiy7a0XLubZXa8gg9j1ZIPgvpb6G8Y\"\n]"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "url",
+              "displayName": "url",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "depth",
+              "displayName": "depth",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "number",
+              "removed": false
+            },
+            {
+              "id": "max_pages_per_level",
+              "displayName": "max_pages_per_level",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "selector",
+              "displayName": "selector",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "include_links",
+              "displayName": "include_links",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "include_images",
+              "displayName": "include_images",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "include_meta",
+              "displayName": "include_meta",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "boolean",
+              "removed": true
+            },
+            {
+              "id": "session",
+              "displayName": "session",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "boolean",
+              "removed": false
+            },
+            {
+              "id": "chunk_size",
+              "displayName": "chunk_size",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "auth_tokens",
+              "displayName": "auth_tokens",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "array",
+              "defaultValue": "[\n  \"string\"\n]",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        0,
+        112
+      ],
+      "id": "e480ba3c-c469-404f-846d-ef8556521b71",
+      "name": "gofr-dig - get_url_content"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://gofr-dig-mcp:8070/mcp/",
+        "tool": {
+          "__rl": true,
+          "value": "set_antidetection",
+          "mode": "list",
+          "cachedResultName": "set_antidetection"
+        },
+        "parameters": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "profile": "stealth"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "profile",
+              "displayName": "profile",
+              "defaultMatch": false,
+              "required": true,
+              "display": true,
+              "type": "options",
+              "options": [
+                {
+                  "name": "stealth",
+                  "value": "stealth"
+                },
+                {
+                  "name": "balanced",
+                  "value": "balanced"
+                },
+                {
+                  "name": "none",
+                  "value": "none"
+                },
+                {
+                  "name": "custom",
+                  "value": "custom"
+                },
+                {
+                  "name": "browser_tls",
+                  "value": "browser_tls"
+                }
+              ],
+              "removed": false
+            },
+            {
+              "id": "custom_headers",
+              "displayName": "custom_headers",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "object",
+              "defaultValue": "{\n  \"<additionalProperty>\": \"string\"\n}",
+              "removed": true
+            },
+            {
+              "id": "custom_user_agent",
+              "displayName": "custom_user_agent",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "string",
+              "removed": true
+            },
+            {
+              "id": "rate_limit_delay",
+              "displayName": "rate_limit_delay",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "max_response_chars",
+              "displayName": "max_response_chars",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "number",
+              "removed": true
+            },
+            {
+              "id": "auth_token",
+              "displayName": "auth_token",
+              "defaultMatch": false,
+              "required": false,
+              "display": true,
+              "type": "string",
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        112
+      ],
+      "id": "90b69bc3-8db4-4659-8bcd-65e70a0b3d78",
+      "name": "GOFR- Dig - AntiDetect"
+    },
+    {
+      "parameters": {
+        "operation": "toJson",
+        "binaryPropertyName": "=data {{ $json.content }}",
+        "options": {
+          "fileName": "={{\n`file-${Math.random().toString(36).substring(2,10).toUpperCase()}-${(() => {const d=new Date(),m=[\"Jan\",\"Feb\",\"Mar\",\"Apr\",\"May\",\"Jun\",\"Jul\",\"Aug\",\"Sep\",\"Oct\",\"Nov\",\"Dec\"];return `${String(d.getDate()).padStart(2,\"0\")}${m[d.getMonth()]}${d.getFullYear()}-${String(d.getHours()).padStart(2,\"0\")}${String(d.getMinutes()).padStart(2,\"0\")}${String(d.getSeconds()).padStart(2,\"0\")}`;})()}.json`;\n}}"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        240,
+        112
+      ],
+      "id": "17525e97-58de-4428-b924-13a4afea4c43",
+      "name": "Convert to File"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "GOFR- Dig - AntiDetect",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gofr-dig - get_url_content": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GOFR- Dig - AntiDetect": {
+      "main": [
+        [
+          {
+            "node": "gofr-dig - get_url_content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "1de17339-00b3-4c47-a8b5-1849784cfe04",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "e7710989075587e3934d997427a9c01aa0edc77870f68d64aec865670863b793"
+  },
+  "id": "eUaEaxzInwSfOYtXVph-h",
+  "tags": []
+}

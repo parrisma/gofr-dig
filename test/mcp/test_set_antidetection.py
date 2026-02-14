@@ -151,7 +151,7 @@ class TestScrapingState:
         assert state.custom_user_agent is None
         assert state.respect_robots_txt is True
         assert state.rate_limit_delay == 1.0
-        assert state.max_tokens == 100000
+        assert state.max_response_chars == 400000
 
     def test_state_is_singleton(self):
         """Test that get_scraping_state returns same instance."""
@@ -286,8 +286,8 @@ class TestSetAntidetectionMCPTool:
         assert "valid_profiles" in data.get("details", {})
 
     @pytest.mark.asyncio
-    async def test_set_robots_txt_option(self):
-        """Test setting respect_robots_txt option."""
+    async def test_robots_txt_is_always_enabled(self):
+        """robots.txt remains enabled regardless of provided input."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         result = await handle_call_tool(
@@ -296,10 +296,10 @@ class TestSetAntidetectionMCPTool:
         )
 
         data = get_mcp_result_data(result)
-        assert data["respect_robots_txt"] is False
+        assert data["respect_robots_txt"] is True
 
         state = get_scraping_state()
-        assert state.respect_robots_txt is False
+        assert state.respect_robots_txt is True
 
     @pytest.mark.asyncio
     async def test_set_rate_limit_delay(self):
@@ -331,48 +331,48 @@ class TestSetAntidetectionMCPTool:
         assert "error" in data
 
     @pytest.mark.asyncio
-    async def test_set_max_tokens(self):
-        """Test setting max_tokens option."""
+    async def test_set_max_response_chars(self):
+        """Test setting max_response_chars option."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         result = await handle_call_tool(
             "set_antidetection",
-            {"profile": "balanced", "max_tokens": 50000},
+            {"profile": "balanced", "max_response_chars": 50000},
         )
 
         data = get_mcp_result_data(result)
-        assert data["max_tokens"] == 50000
+        assert data["max_response_chars"] == 50000
 
         state = get_scraping_state()
-        assert state.max_tokens == 50000
+        assert state.max_response_chars == 50000
 
     @pytest.mark.asyncio
-    async def test_max_tokens_too_low_returns_error(self):
-        """Test that max_tokens below 1000 returns error."""
+    async def test_max_response_chars_too_low_returns_error(self):
+        """Test that max_response_chars below 4000 returns error."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         result = await handle_call_tool(
             "set_antidetection",
-            {"profile": "balanced", "max_tokens": 500},
+            {"profile": "balanced", "max_response_chars": 500},
         )
 
         data = get_mcp_result_data(result)
         assert data["success"] is False
-        assert data["error_code"] == "INVALID_MAX_TOKENS"
+        assert data["error_code"] == "INVALID_MAX_RESPONSE_CHARS"
 
     @pytest.mark.asyncio
-    async def test_max_tokens_too_high_returns_error(self):
-        """Test that max_tokens above 1000000 returns error."""
+    async def test_max_response_chars_too_high_returns_error(self):
+        """Test that max_response_chars above 4000000 returns error."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         result = await handle_call_tool(
             "set_antidetection",
-            {"profile": "balanced", "max_tokens": 2000000},
+            {"profile": "balanced", "max_response_chars": 5000000},
         )
 
         data = get_mcp_result_data(result)
         assert data["success"] is False
-        assert data["error_code"] == "INVALID_MAX_TOKENS"
+        assert data["error_code"] == "INVALID_MAX_RESPONSE_CHARS"
 
     @pytest.mark.asyncio
     async def test_tool_is_listed(self):

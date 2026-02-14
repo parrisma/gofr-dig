@@ -28,7 +28,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_antidetection",
-            description="Configure anti-detection before scraping. PROFILES: 'stealth'=full browser headers, 'balanced'=standard protection (recommended), 'none'=minimal headers, 'custom'=user-defined, 'browser_tls'=Chrome TLS fingerprint (for Wikipedia). TOKEN LIMIT: max_tokens controls response size (default: 100000). Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_tokens}",
+            description="Configure anti-detection before scraping. PROFILES: 'stealth'=full browser headers, 'balanced'=standard protection (recommended), 'none'=minimal headers, 'custom'=user-defined, 'browser_tls'=Chrome TLS fingerprint (for Wikipedia). SIZE LIMIT: max_response_chars controls response size (default: 400000). Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_response_chars}",
             inputSchema={
                 "type": "object",
                 "required": ["profile"],
@@ -47,20 +47,20 @@ def get_tools() -> list[Tool]:
                         "type": "string",
                         "description": "Custom User-Agent when profile='custom'",
                     },
-                    "respect_robots_txt": {
-                        "type": "boolean",
-                        "description": "Whether to respect robots.txt (default: true)",
-                    },
                     "rate_limit_delay": {
                         "type": "number",
                         "description": "Delay between requests in seconds (0-60.0, default: 1.0)",
                         "minimum": 0,
                     },
-                    "max_tokens": {
+                    "max_response_chars": {
                         "type": "integer",
-                        "description": "Maximum tokens to return (1000-1000000, default: 100000)",
-                        "minimum": 1000,
-                        "maximum": 1000000,
+                        "description": "Maximum characters to return (4000-4000000, default: 400000)",
+                        "minimum": 4000,
+                        "maximum": 4000000,
+                    },
+                    "auth_token": {
+                        "type": "string",
+                        "description": "JWT token for authentication",
                     },
                 },
             },
@@ -92,6 +92,11 @@ def get_tools() -> list[Tool]:
                         "minimum": 1,
                         "maximum": 20,
                     },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Per-request timeout in seconds (default: 60)",
+                        "minimum": 1,
+                    },
                 },
             },
         ),
@@ -105,6 +110,15 @@ def get_tools() -> list[Tool]:
                     "url": {
                         "type": "string",
                         "description": "URL to analyze (must be valid http/https URL)",
+                    },
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector to scope analysis (optional)",
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Per-request timeout in seconds (default: 60)",
+                        "minimum": 1,
                     }
                 },
             },

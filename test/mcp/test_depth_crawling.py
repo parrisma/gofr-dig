@@ -2,13 +2,15 @@
 
 Phase 8: Tests for multi-level crawling with depth parameter.
 
-depth > 1 auto-forces session mode (large payloads). These tests verify:
-1. Depth > 1 returns a session response (session_id, total_chunks, etc.)
-2. Session content can be retrieved via session manager
-3. max_pages_per_level is respected (via total_pages in response)
-4. Dead links don't break the crawl
-5. Depth validation / clamping works
-6. Selectors are applied during crawl
+session defaults to false (inline). Caller must set session=true explicitly.
+These tests verify:
+1. Depth > 1 with session=true returns a session response (session_id, total_chunks, etc.)
+2. Depth > 1 without session returns inline content
+3. Session content can be retrieved via session manager
+4. max_pages_per_level is respected
+5. Dead links don't break the crawl
+6. Depth validation / clamping works
+7. Selectors are applied during crawl
 """
 
 import json
@@ -81,8 +83,8 @@ class TestDepthCrawling:
         assert data_default["url"] == data_depth1["url"]
 
     @pytest.mark.asyncio
-    async def test_depth_2_auto_session(self, html_fixture_server):
-        """Test depth=2 auto-forces session mode and returns session response."""
+    async def test_depth_2_inline_by_default(self, html_fixture_server):
+        """Test depth=2 without session returns inline content (no auto-session)."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
@@ -94,7 +96,29 @@ class TestDepthCrawling:
         data = get_mcp_result_data(result)
 
         assert data["success"] is True
-        assert "session_id" in data, "depth > 1 must auto-force session mode"
+        assert data["response_type"] == "inline"
+        assert "session_id" not in data, "session defaults to false — no session_id"
+        assert "pages" in data, "inline multi-page response must include pages"
+        assert len(data["pages"]) >= 1
+        assert data["crawl_depth"] == 2
+        assert data["summary"]["total_pages"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_depth_2_auto_session(self, html_fixture_server):
+        """Test depth=2 with session=true returns session response."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        url = html_fixture_server.get_url("index.html")
+        result = await handle_call_tool("get_content", {
+            "url": url,
+            "depth": 2,
+            "max_pages_per_level": 3,
+            "session": True,
+        })
+        data = get_mcp_result_data(result)
+
+        assert data["success"] is True
+        assert "session_id" in data, "session=true must return session_id"
         assert data["total_chunks"] >= 1
         assert data["total_size"] > 0
         assert data["crawl_depth"] == 2
@@ -111,6 +135,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 3,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -125,7 +150,7 @@ class TestDepthCrawling:
 
     @pytest.mark.asyncio
     async def test_depth_3_auto_session(self, html_fixture_server):
-        """Test depth=3 auto-forces session and stores nested crawl."""
+        """Test depth=3 with session=true stores nested crawl."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
@@ -133,6 +158,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 3,
             "max_pages_per_level": 3,
+            "session": True,
         })
         data = get_mcp_result_data(result)
 
@@ -157,6 +183,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 3,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -181,6 +208,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 2,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -203,6 +231,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 2,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -221,6 +250,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 3,
             "max_pages_per_level": 5,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -243,7 +273,7 @@ class TestDepthCrawling:
         data = get_mcp_result_data(result)
 
         assert data["success"] is True
-        assert data["total_pages"] >= 1, "Should have at least root page"
+        assert data["summary"]["total_pages"] >= 1, "Should have at least root page"
 
     @pytest.mark.asyncio
     async def test_depth_summary_accurate(self, html_fixture_server):
@@ -255,6 +285,7 @@ class TestDepthCrawling:
             "url": url,
             "depth": 2,
             "max_pages_per_level": 3,
+            "session": True,
         })
         data = get_mcp_result_data(result)
         content = get_session_content(data["session_id"])
@@ -282,7 +313,7 @@ class TestDepthCrawling:
 
     @pytest.mark.asyncio
     async def test_depth_parameter_validation_max(self, html_fixture_server):
-        """Test that depth > 3 is clamped to 3 (auto-session)."""
+        """Test that depth > 3 is clamped to 3."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("index.html")
@@ -310,8 +341,8 @@ class TestDepthCrawling:
         data = get_mcp_result_data(result)
 
         assert data["success"] is True
-        # total_pages >= 1 means clamping worked
-        assert data["total_pages"] >= 1
+        # Inline multi-page: total_pages in summary
+        assert data["summary"]["total_pages"] >= 1, "Clamping worked"
 
     @pytest.mark.asyncio
     async def test_depth_crawl_with_selector(self, html_fixture_server):
@@ -324,6 +355,7 @@ class TestDepthCrawling:
             "depth": 2,
             "max_pages_per_level": 2,
             "selector": "#content",
+            "session": True,
         })
         data = get_mcp_result_data(result)
 
@@ -352,7 +384,7 @@ class TestDepthCrawlingEdgeCases:
 
     @pytest.mark.asyncio
     async def test_depth_crawl_on_page_with_no_internal_links(self, html_fixture_server):
-        """Test depth crawl on page with only external links (session mode)."""
+        """Test depth crawl on page with only external links."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         url = html_fixture_server.get_url("external-links.html")
@@ -364,7 +396,7 @@ class TestDepthCrawlingEdgeCases:
         data = get_mcp_result_data(result)
 
         assert data["success"] is True
-        assert data["total_pages"] >= 1
+        assert data["summary"]["total_pages"] >= 1
 
     @pytest.mark.asyncio
     async def test_depth_crawl_root_page_failure(self):

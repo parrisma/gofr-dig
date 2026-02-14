@@ -46,9 +46,9 @@ from gofr_common.auth.admin import VaultAdmin  # noqa: E402
 from gofr_common.auth.backends.vault_client import VaultClient  # noqa: E402
 from gofr_common.auth.backends.vault_config import VaultConfig  # noqa: E402
 
-# Services to provision (role_name → policy_name)
+# Services to provision (role_name → policy_names)
 SERVICES = {
-    "gofr-dig": "gofr-dig-policy",
+    "gofr-dig": ["gofr-dig-policy", "gofr-dig-logging-policy"],
 }
 
 
@@ -123,13 +123,17 @@ def main() -> int:
     # Provision each service
     SERVICE_CREDS_DIR.mkdir(parents=True, exist_ok=True)
 
-    for service_name, policy_name in SERVICES.items():
-        log_info(f"Provisioning AppRole: {service_name} → {policy_name}")
+    for service_name, policy_names in SERVICES.items():
+        primary_policy = policy_names[0]
+        extra_policies = policy_names[1:]
+        policy_list = ", ".join(policy_names)
+        log_info(f"Provisioning AppRole: {service_name} → [{policy_list}]")
 
         # Create or update the role
         admin.provision_service_role(
             service_name=service_name,
-            policy_name=policy_name,
+            policy_name=primary_policy,
+            additional_policy_names=extra_policies,
             token_ttl="1h",
             token_max_ttl="24h",
         )
@@ -150,7 +154,7 @@ def main() -> int:
     log_info(f"Credentials dir: {SERVICE_CREDS_DIR}")
     log_info("")
     log_info("Next steps:")
-    log_info("  1. Start gofr-dig: ./docker/start-prod.sh")
+    log_info("  1. Start gofr-dig: ./scripts/start-prod.sh")
     log_info("  2. Credentials are auto-mounted to /run/secrets/vault_creds")
     return 0
 

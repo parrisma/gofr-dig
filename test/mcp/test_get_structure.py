@@ -197,6 +197,33 @@ class TestStructureAnalyzer:
         section = next(s for s in structure.sections if s["id"] == "intro")
         assert section["heading"] == "Introduction"
 
+    def test_selector_scopes_analysis(self):
+        """Selector should scope analysis to matching subtree."""
+        html = """
+        <html>
+        <body>
+            <nav><a href="/home">Home</a></nav>
+            <main id="content"><a href="/inside">Inside</a></main>
+        </body>
+        </html>
+        """
+        analyzer = StructureAnalyzer()
+        structure = analyzer.analyze(html, url="https://example.com", selector="#content")
+
+        assert structure.success
+        # nav link should not be included when scoped to #content
+        nav_urls = [n["url"] for n in structure.navigation]
+        assert "https://example.com/home" not in nav_urls
+        internal_urls = [n["url"] for n in structure.internal_links]
+        assert "https://example.com/inside" in internal_urls
+
+    def test_selector_not_found_returns_error(self):
+        """Missing selector should return an analyzer error."""
+        analyzer = StructureAnalyzer()
+        structure = analyzer.analyze("<html><body><main>ok</main></body></html>", selector="#missing")
+        assert structure.success is False
+        assert "did not match" in (structure.error or "")
+
 
 class TestGetStructureMCPTool:
     """Integration tests for get_structure MCP tool."""
@@ -303,6 +330,30 @@ class TestGetStructureMCPTool:
 
         data = get_mcp_result_data(result)
         assert data.get("forms") is None
+
+    @pytest.mark.asyncio
+    async def test_get_structure_with_selector(self, html_fixture_server):
+        """Test selector-scoped structure analysis."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        url = html_fixture_server.get_url("index.html")
+        result = await handle_call_tool("get_structure", {"url": url, "selector": "main"})
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is True
+        assert "sections" in data
+
+    @pytest.mark.asyncio
+    async def test_get_structure_invalid_timeout(self, html_fixture_server):
+        """Invalid timeout_seconds should return INVALID_ARGUMENT."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        url = html_fixture_server.get_url("index.html")
+        result = await handle_call_tool("get_structure", {"url": url, "timeout_seconds": 0})
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is False
+        assert data["error_code"] == "INVALID_ARGUMENT"
 
     @pytest.mark.asyncio
     async def test_get_structure_chinese_page(self, html_fixture_server):

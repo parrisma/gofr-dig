@@ -21,7 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Secrets directory — inside the dev container this is the gofr-secrets Docker
-# volume (mounted at $PROJECT_ROOT/secrets by run-dev.sh).  On the host it may
+# volume (mounted at $PROJECT_ROOT/secrets by run-dev-container.sh).  On the host it may
 # not exist yet, so we fall back to lib/gofr-common/secrets/ where
 # manage_vault.sh bootstrap writes the initial credentials.
 # Source port config (single source of truth)

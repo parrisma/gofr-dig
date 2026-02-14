@@ -74,6 +74,26 @@ if __name__ == "__main__":
     # Create logger for startup messages
     startup_logger: Logger = session_logger
 
+    seq_url_set = bool(os.environ.get("GOFR_DIG_SEQ_URL"))
+    seq_api_key_set = bool(os.environ.get("GOFR_DIG_SEQ_API_KEY"))
+    sink_status = "ok" if seq_url_set and seq_api_key_set else "degraded"
+    sink_reason = (
+        "vault_seq_credentials_available"
+        if sink_status == "ok"
+        else "missing_seq_url_or_api_key_falling_back_to_local_logging"
+    )
+    startup_logger.info(
+        "Logging sink initialized",
+        event="logging_sink_initialized",
+        operation="service_startup",
+        stage="startup",
+        dependency="seq",
+        sink="seq",
+        status=sink_status,
+        reason=sink_reason,
+        result=sink_status,
+    )
+
     # Resolve authentication configuration
     jwt_secret, _require_auth = resolve_auth_config(
         env_prefix="GOFR_DIG",
@@ -92,6 +112,7 @@ if __name__ == "__main__":
             group_registry=group_registry,
             secret_key=jwt_secret,
             env_prefix="GOFR_DIG",
+            audience="gofr-api",
         )
         startup_logger.info(
             "Authentication service initialized",

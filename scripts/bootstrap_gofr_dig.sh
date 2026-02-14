@@ -450,23 +450,23 @@ start_dev_container() {
     return 0
   fi
 
-  if [[ ! -f "${PROJECT_ROOT}/docker/run-dev.sh" ]]; then
-    die "Dev run script not found at docker/run-dev.sh." \
-      "Verify your clone is complete and that the docker directory exists."
+  if [[ ! -f "${PROJECT_ROOT}/scripts/run-dev-container.sh" ]]; then
+    die "Dev run script not found at scripts/run-dev-container.sh." \
+      "Verify your clone is complete and that the scripts directory exists."
   fi
 
   info "Starting dev container (gofr-dig-dev)..."
-  (cd "${PROJECT_ROOT}" && bash ./docker/run-dev.sh)
+  (cd "${PROJECT_ROOT}" && bash ./scripts/run-dev-container.sh)
   ok "Dev container started."
 }
 
 start_prod_stack() {
   info "Starting production stack..."
-  if [[ ! -f "${PROJECT_ROOT}/docker/start-prod.sh" ]]; then
-    die "Prod start script not found at docker/start-prod.sh." \
-      "Verify your clone is complete and that the docker directory exists."
+  if [[ ! -f "${PROJECT_ROOT}/scripts/start-prod.sh" ]]; then
+    die "Prod start script not found at scripts/start-prod.sh." \
+      "Verify your clone is complete and that the scripts directory exists."
   fi
-  (cd "${PROJECT_ROOT}" && bash ./docker/start-prod.sh)
+  (cd "${PROJECT_ROOT}" && bash ./scripts/start-prod.sh)
   ok "Production stack started."
 }
 
@@ -476,7 +476,7 @@ run_tests_in_dev() {
     if [[ "$START_DEV" == "true" ]]; then
       start_dev_container
     else
-      warn "Fix: start it with --start-dev or run ./docker/run-dev.sh first."
+      warn "Fix: start it with --start-dev or run ./scripts/run-dev-container.sh first."
       return 1
     fi
   fi
@@ -521,7 +521,7 @@ main() {
 
   echo ""
   ok "gofr-dig bootstrap complete."
-  info "Next: ./docker/run-dev.sh or ./docker/start-prod.sh"
+  info "Next: ./scripts/run-dev-container.sh or ./scripts/start-prod.sh"
 }
 
 main

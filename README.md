@@ -36,13 +36,13 @@ so N8N in chrome = http://172.22.0.1:8084/setup
 
 ```bash
 # Start production stack (MCP :8070, MCPO :8071, Web :8072)
-./docker/start-prod.sh
+./scripts/start-prod.sh
 
 # Without authentication
-./docker/start-prod.sh --no-auth
+./scripts/start-prod.sh --no-auth
 
 # Stop
-./docker/start-prod.sh --down
+./scripts/start-prod.sh --down
 ```
 
 ### Local development

@@ -34,7 +34,7 @@ We provide a single script that sets up everything (databases, keys, networks, a
 Good for coding and testing changes.
 
 ```bash
-./docker/run-dev.sh
+./scripts/run-dev-container.sh
 ```
 
 ### Production Mode
@@ -42,10 +42,10 @@ Good for coding and testing changes.
 Good for running the service for actual use.
 
 ```bash
-./docker/start-prod.sh
+./scripts/start-prod.sh
 ```
 
-*(To stop the production service, run `./docker/start-prod.sh --down`)*
+*(To stop the production service, run `./scripts/start-prod.sh --down`)*
 
 ## Verifying It Works
 

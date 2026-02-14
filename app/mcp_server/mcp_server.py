@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
+import time
 from typing import Any, AsyncIterator, Dict, List
+from urllib.parse import urlparse
 
 from mcp.server import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -26,6 +29,7 @@ from app.exceptions import GofrDigError
 from app.errors.mapper import error_to_mcp_response, RECOVERY_STRATEGIES
 from app.session.manager import SessionManager
 from app.config import Config
+from app.rate_limit import get_rate_limiter
 
 try:
     from gofr_common.auth.exceptions import AuthError
@@ -37,15 +41,14 @@ try:
 except ImportError:
     PermissionDeniedError = None  # type: ignore[assignment,misc]
 
-# Shared auth_tokens schema fragment — added to every tool except ping.
-AUTH_TOKENS_SCHEMA = {
-    "auth_tokens": {
-        "type": "array",
-        "items": {"type": "string"},
+# Shared auth_token schema fragment — added to every tool except ping.
+AUTH_TOKEN_SCHEMA = {
+    "auth_token": {
+        "type": "string",
         "description": (
-            "One or more JWT tokens for authentication. "
-            "The server verifies each token and uses the first group "
-            "from the first valid token to scope session access. "
+            "JWT token for authentication. "
+            "The server verifies the token and uses the first group "
+            "to scope session access. "
             "Omit for anonymous/public access."
         ),
     },
@@ -55,46 +58,36 @@ AUTH_TOKENS_SCHEMA = {
 auth_service: Any = None
 
 
-def _resolve_group_from_tokens(auth_tokens: list[str] | None) -> str | None:
-    """Resolve the primary group from auth_tokens passed as a tool parameter.
+def _resolve_group_from_token(auth_token: str | None) -> str | None:
+    """Resolve the primary group from an auth_token passed as a tool parameter.
 
-    Returns the first group from the first valid token, or None if
-    auth is disabled or no tokens provided.
+    Returns the first group from the token, or None if
+    auth is disabled or no token provided.
 
-    Raises AuthError if tokens are provided but all are invalid.
+    Raises AuthError if a token is provided but invalid.
     """
     if auth_service is None:
         return None  # auth disabled (--no-auth)
 
-    if not auth_tokens:
+    if not auth_token:
         return None  # anonymous → public
 
-    last_error: Exception | None = None
-    for raw_token in auth_tokens:
-        # Strip "Bearer " prefix if present
-        if raw_token.lower().startswith("bearer "):
-            raw_token = raw_token[7:].strip()
-        else:
-            raw_token = raw_token.strip()
+    raw_token = auth_token
+    # Strip "Bearer " prefix if present
+    if raw_token.lower().startswith("bearer "):
+        raw_token = raw_token[7:].strip()
+    else:
+        raw_token = raw_token.strip()
 
-        if not raw_token:
-            continue
+    if not raw_token:
+        return None  # empty string → anonymous
 
-        try:
-            token_info = auth_service.verify_token(raw_token)
-            if token_info.groups:
-                return token_info.groups[0]  # primary group = first in list
-            return None  # valid token, no groups → anonymous
-        except Exception as e:
-            if AuthError is not None and isinstance(e, AuthError):
-                last_error = e
-                continue  # try next token
-            raise  # unexpected error, propagate
+    token_info = auth_service.verify_token(raw_token)
+    if token_info.groups:
+        return token_info.groups[0]  # primary group = first in list
+    return None  # valid token, no groups → anonymous
 
-    # All tokens failed
-    if last_error:
-        raise last_error
-    return None
+
 templates_dir_override: str | None = None
 styles_dir_override: str | None = None
 web_url_override: str | None = None
@@ -108,8 +101,8 @@ app = Server(
 RECOMMENDED WORKFLOW:
 1. (Optional) set_antidetection — configure a scraping profile before fetching. Use 'balanced' for most sites, 'browser_tls' for sites like Wikipedia. Skip this step for simple fetches (sensible defaults apply).
 2. get_structure — analyze a page's layout to discover CSS selectors, navigation, forms, and heading outline. Use this to decide WHAT to extract.
-3. get_content — fetch and extract text. For a single page use depth=1 (default). For documentation sites use depth=2 or 3 (these automatically store results in a session because the payload is large).
-4. If a session_id is returned (depth > 1, or session=true), retrieve content with get_session_chunk(session_id, chunk_index) iterating chunk_index from 0 to total_chunks-1. Use get_session_info to check session metadata.
+3. get_content — fetch and extract text. For a single page use depth=1 (default). For documentation sites use depth=2 or 3. Set session=true to store results server-side; by default content is returned inline.
+4. If session=true was set and a session_id is returned, retrieve content with get_session_chunk(session_id, chunk_index) iterating chunk_index from 0 to total_chunks-1. Use get_session_info to check session metadata.
 5. list_sessions — browse all stored sessions from previous scrapes.
 6. get_session_urls — get plain HTTP URLs for every chunk (useful for automation fan-out to N8N, Make, Zapier).
 
@@ -136,6 +129,65 @@ def _json_text(data: Any) -> TextContent:
     return _common_json_text(data)
 
 
+def _safe_url_host(url: Any) -> str | None:
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        return urlparse(url).netloc or None
+    except Exception:
+        return None
+
+
+def _tool_invoked_message(name: str, arguments: Dict[str, Any]) -> str:
+    """Build a human-readable message for tool invocation logs.
+
+    The message is what SEQ / operators see first, so it must
+    answer: *what* tool, *against what target*, with *which key params*.
+    """
+    url = arguments.get("url") or ""
+    host = _safe_url_host(url)
+    sid = arguments.get("session_id")
+    depth = arguments.get("depth")
+
+    parts = [name]
+    if host:
+        parts.append(host)
+    elif sid:
+        parts.append(f"session={sid}")
+    if depth and int(depth) > 1:
+        parts.append(f"depth={depth}")
+    if arguments.get("session"):
+        parts.append("session_mode")
+    if arguments.get("selector"):
+        parts.append(f"selector={arguments['selector'][:40]}")
+
+    return " | ".join(parts)
+
+
+def _tool_args_summary(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    request_id = arguments.get("request_id")
+    session_id = arguments.get("session_id")
+    url = arguments.get("url", "")
+    summary: Dict[str, Any] = {
+        "event": "tool_invoked",
+        "tool": name,
+        "operation": name,
+        "stage": "invoke",
+        "dependency": "mcp",
+        "request_id": request_id,
+        "session_id": session_id,
+        "url": url if url else None,
+        "selector_present": bool(arguments.get("selector")),
+        "depth": arguments.get("depth"),
+        "session_mode": bool(arguments.get("session")),
+        "timeout_seconds": arguments.get("timeout_seconds"),
+        "max_chars": arguments.get("max_chars"),
+        "group": arguments.get("group"),
+        "url_host": _safe_url_host(url),
+    }
+    return {k: v for k, v in summary.items() if v is not None}
+
+
 def _classify_fetch_error(result: FetchResult) -> str:
     """Map a failed FetchResult to a specific error code.
 
@@ -152,6 +204,8 @@ def _classify_fetch_error(result: FetchResult) -> str:
     if result.status_code >= 500:
         return "FETCH_ERROR"
     error_str = (result.error or "").lower()
+    if "private" in error_str and "internal" in error_str:
+        return "SSRF_BLOCKED"
     if "timeout" in error_str or "timed out" in error_str:
         return "TIMEOUT_ERROR"
     if "connect" in error_str or "resolve" in error_str or "dns" in error_str:
@@ -181,12 +235,12 @@ def _error_response(
     details: Dict[str, Any] | None = None,
 ) -> List[TextContent]:
     """Create a standardized error response with recovery strategy.
-    
+
     Args:
         error_code: Machine-readable error code (e.g., "INVALID_URL")
         message: Human-readable error message
         details: Optional additional context
-        
+
     Returns:
         List with single TextContent containing JSON error response
     """
@@ -201,167 +255,162 @@ def _error_response(
     }
     if details:
         response["details"] = details
-    
+
     logger.warning("Tool error", error_code=error_code, error_message=message, details=details)
     return [_json_text(response)]
 
 
 def _exception_response(error: GofrDigError) -> List[TextContent]:
     """Convert GofrDigError to MCP response format.
-    
+
     Args:
         error: The exception to convert
-        
+
     Returns:
         List with single TextContent containing JSON error response
     """
     response = error_to_mcp_response(error)
-    logger.warning("Tool exception", error_code=response["error_code"], error_message=response["message"])
+    logger.warning(
+        "Tool exception", error_code=response["error_code"], error_message=response["message"]
+    )
     return [_json_text(response)]
 
 
-def _estimate_tokens(text: str) -> int:
-    """Estimate token count from text (approx 1 token per 4 characters)."""
-    return len(text) // 4
+def _truncate_to_chars(text: str, max_chars: int) -> tuple[str, bool]:
+    """Truncate text to fit within character limit.
 
-
-def _truncate_to_tokens(text: str, max_tokens: int) -> tuple[str, bool]:
-    """Truncate text to fit within token limit.
-    
     Args:
         text: Text to truncate
-        max_tokens: Maximum tokens allowed
-        
+        max_chars: Maximum characters allowed
+
     Returns:
         Tuple of (truncated_text, was_truncated)
     """
-    max_chars = max_tokens * 4
     if len(text) <= max_chars:
         return text, False
-    
+
     # Truncate and try to end at a sentence or word boundary
     truncated = text[:max_chars]
-    
+
     # Try to find a sentence ending
-    last_period = truncated.rfind('. ')
-    last_newline = truncated.rfind('\n')
+    last_period = truncated.rfind(". ")
+    last_newline = truncated.rfind("\n")
     break_point = max(last_period, last_newline)
-    
+
     if break_point > max_chars * 0.8:  # Only use if we keep at least 80%
-        truncated = truncated[:break_point + 1]
-    
-    return truncated.rstrip() + "\n\n[Content truncated due to token limit]", True
+        truncated = truncated[: break_point + 1]
+
+    return truncated.rstrip() + "\n\n[Content truncated due to size limit]", True
 
 
-def _apply_token_limit(page_data: Dict[str, Any], max_tokens: int) -> tuple[Dict[str, Any], bool]:
-    """Apply token limit to a single page's content.
-    
+def _apply_char_limit(page_data: Dict[str, Any], max_chars: int) -> tuple[Dict[str, Any], bool]:
+    """Apply character limit to a single page's content.
+
     Args:
         page_data: Page data dictionary with 'text' field
-        max_tokens: Maximum tokens allowed
-        
+        max_chars: Maximum characters allowed
+
     Returns:
         Tuple of (modified_page_data, was_truncated)
     """
     if not page_data.get("success", False):
         return page_data, False
-    
+
     text = page_data.get("text", "")
     if not text:
         return page_data, False
-    
-    truncated_text, was_truncated = _truncate_to_tokens(text, max_tokens)
+
+    truncated_text, was_truncated = _truncate_to_chars(text, max_chars)
     if was_truncated:
         page_data = page_data.copy()
         page_data["text"] = truncated_text
         page_data["truncated"] = True
-        page_data["original_tokens"] = _estimate_tokens(text)
-        page_data["returned_tokens"] = _estimate_tokens(truncated_text)
-    
+        page_data["original_chars"] = len(text)
+        page_data["returned_chars"] = len(truncated_text)
+
     return page_data, was_truncated
 
 
-def _apply_token_limit_multipage(results: Dict[str, Any], max_tokens: int) -> tuple[Dict[str, Any], bool]:
-    """Apply token limit across multi-page crawl results.
-    
+def _apply_char_limit_multipage(
+    results: Dict[str, Any], max_chars: int
+) -> tuple[Dict[str, Any], bool]:
+    """Apply character limit across multi-page crawl results.
+
     Truncates pages in reverse order (deepest first) to preserve most important content.
-    
+
     Args:
         results: Multi-page results with 'pages' array and root 'text'
-        max_tokens: Maximum tokens allowed
-        
+        max_chars: Maximum characters allowed
+
     Returns:
         Tuple of (modified_results, was_truncated)
     """
-    # Calculate total tokens across all content
+    # Calculate total characters across all content
     root_text = results.get("text", "") or ""
-    root_tokens = _estimate_tokens(root_text)
-    
+    root_chars = len(root_text)
+
     pages = results.get("pages", [])
-    page_tokens = [_estimate_tokens(p.get("text", "") or "") for p in pages]
-    total_tokens = root_tokens + sum(page_tokens)
-    
-    if total_tokens <= max_tokens:
+    page_chars = [len(p.get("text", "") or "") for p in pages]
+    total_chars = root_chars + sum(page_chars)
+
+    if total_chars <= max_chars:
         return results, False
-    
+
     # Need to truncate - work backwards from deepest pages
     results = results.copy()
     results["pages"] = [p.copy() for p in pages]
     results["truncated"] = True
-    results["original_tokens"] = total_tokens
-    
-    tokens_to_remove = total_tokens - max_tokens
+    results["original_chars"] = total_chars
+
+    chars_to_remove = total_chars - max_chars
     pages_removed = 0
     pages_truncated = 0
-    
+
     # First, try removing pages from the end (deepest first)
-    while tokens_to_remove > 0 and results["pages"]:
+    while chars_to_remove > 0 and results["pages"]:
         last_page = results["pages"][-1]
-        last_page_tokens = _estimate_tokens(last_page.get("text", "") or "")
-        
-        if last_page_tokens <= tokens_to_remove:
+        last_page_chars = len(last_page.get("text", "") or "")
+
+        if last_page_chars <= chars_to_remove:
             # Remove entire page
             results["pages"].pop()
-            tokens_to_remove -= last_page_tokens
+            chars_to_remove -= last_page_chars
             pages_removed += 1
         else:
             # Truncate this page's text
-            remaining_tokens_for_page = last_page_tokens - tokens_to_remove
-            if remaining_tokens_for_page < 500:  # Too small, remove it
+            remaining_chars = last_page_chars - chars_to_remove
+            if remaining_chars < 2000:  # Too small, remove it
                 results["pages"].pop()
-                tokens_to_remove -= last_page_tokens
+                chars_to_remove -= last_page_chars
                 pages_removed += 1
             else:
-                truncated_text, _ = _truncate_to_tokens(
-                    last_page.get("text", ""),
-                    remaining_tokens_for_page
-                )
+                truncated_text, _ = _truncate_to_chars(last_page.get("text", ""), remaining_chars)
                 results["pages"][-1]["text"] = truncated_text
                 results["pages"][-1]["truncated"] = True
                 pages_truncated += 1
-                tokens_to_remove = 0
-    
+                chars_to_remove = 0
+
     # If still over, truncate root text
-    if tokens_to_remove > 0 and root_text:
-        remaining_tokens_for_root = root_tokens - tokens_to_remove
-        if remaining_tokens_for_root > 500:
-            truncated_text, _ = _truncate_to_tokens(root_text, remaining_tokens_for_root)
+    if chars_to_remove > 0 and root_text:
+        remaining_root_chars = root_chars - chars_to_remove
+        if remaining_root_chars > 2000:
+            truncated_text, _ = _truncate_to_chars(root_text, remaining_root_chars)
             results["text"] = truncated_text
-    
+
     # Update summary
-    results["returned_tokens"] = max_tokens
+    results["returned_chars"] = max_chars
     results["pages_removed_for_limit"] = pages_removed
     results["pages_truncated_for_limit"] = pages_truncated
-    
+
     # Recalculate summary
     actual_pages = len(results["pages"])
     actual_text_length = len(results.get("text", "") or "")
     for page in results["pages"]:
         actual_text_length += len(page.get("text", "") or "")
-    
+
     results["summary"]["total_pages"] = actual_pages
     results["summary"]["total_text_length"] = actual_text_length
-    
+
     return results, True
 
 
@@ -395,12 +444,12 @@ async def handle_list_tools() -> List[Tool]:
                 "- 'none'     \u2014 minimal headers. Use only for APIs or sites you control.\n"
                 "- 'custom'   \u2014 supply your own custom_headers and custom_user_agent.\n\n"
                 "OTHER SETTINGS:\n"
-                "- respect_robots_txt (default true) \u2014 honour robots.txt rules.\n"
                 "- rate_limit_delay (default 1.0s, range 0\u201360) \u2014 pause between requests.\n"
-                "- max_tokens (default 100000, range 1000\u20131000000) \u2014 cap response size; \u22484 chars/token. "
+                "- max_response_chars (default 400000, range 4000\u20134000000) \u2014 cap response size in characters. "
                 "Content exceeding this is truncated (deepest pages removed first).\n\n"
-                "Returns: {success, profile, respect_robots_txt, rate_limit_delay, max_tokens}.\n"
-                "Errors: INVALID_PROFILE, INVALID_RATE_LIMIT, INVALID_MAX_TOKENS."
+                "robots.txt is always respected and cannot be disabled.\n\n"
+                "Returns: {success, profile, rate_limit_delay, max_response_chars}.\n"
+                "Errors: INVALID_PROFILE, INVALID_RATE_LIMIT, INVALID_MAX_RESPONSE_CHARS."
             ),
             inputSchema={
                 "type": "object",
@@ -415,30 +464,26 @@ async def handle_list_tools() -> List[Tool]:
                     },
                     "custom_headers": {
                         "type": "object",
-                        "description": "Custom HTTP headers (only used with profile='custom'). Example: {\"Accept-Language\": \"en-US\"}",
+                        "description": 'Custom HTTP headers (only used with profile=\'custom\'). Example: {"Accept-Language": "en-US"}',
                         "additionalProperties": {"type": "string"},
                     },
                     "custom_user_agent": {
                         "type": "string",
                         "description": "Custom User-Agent string (only used with profile='custom').",
                     },
-                    "respect_robots_txt": {
-                        "type": "boolean",
-                        "description": "Honour robots.txt rules (default: true). Set false only when you have explicit permission.",
-                    },
                     "rate_limit_delay": {
                         "type": "number",
                         "description": "Seconds between requests (default: 1.0, range 0\u201360). Increase if you see rate-limit errors.",
                         "minimum": 0,
                     },
-                    "max_tokens": {
+                    "max_response_chars": {
                         "type": "integer",
-                        "description": "Max tokens in responses (default: 100000). 1 token \u2248 4 characters. Reduce for faster responses; increase to capture full large pages.",
-                        "minimum": 1000,
-                        "maximum": 1000000,
-                        "default": 100000,
+                        "description": "Max response size in characters (default: 400000). Reduce for faster responses; increase to capture full large pages.",
+                        "minimum": 4000,
+                        "maximum": 4000000,
+                        "default": 400000,
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["profile"],
             },
@@ -456,21 +501,18 @@ async def handle_list_tools() -> List[Tool]:
                 "Fetch a web page and extract its readable text. "
                 "This is the primary scraping tool.\n\n"
                 "DEPTH BEHAVIOUR:\n"
-                "- depth=1 (default): scrape a single page. Returns inline JSON: "
-                "{success, url, title, text, language, links, headings, images, meta}.\n"
-                "- depth=2: scrape the page AND the pages it links to. "
-                "Automatically stores results in a server-side session (payload is too large for inline). "
-                "Returns: {success, session_id, url, total_chunks, total_size, crawl_depth, total_pages}.\n"
-                "- depth=3: three levels deep (slow, use sparingly). Same session response.\n\n"
+                "- depth=1 (default): scrape a single page.\n"
+                "- depth=2: scrape the page AND the pages it links to.\n"
+                "- depth=3: three levels deep (slow, use sparingly).\n\n"
                 "SESSION MODE:\n"
-                "When the response contains a session_id (depth>1, or session=true with depth=1), "
-                "use get_session(session_id) to retrieve the full joined text in one call. "
-                "Alternatively, iterate with get_session_chunk(session_id, chunk_index) "
-                "from 0 to total_chunks-1 for finer control.\n\n"
+                "- session=true: store results server-side and return a session_id. "
+                "Use get_session(session_id) or get_session_chunk(session_id, chunk_index) to retrieve content.\n"
+                "- session=false (default): return all content inline.\n"
+                "All parameters are honored exactly as sent — no auto-overrides.\n\n"
                 "TIPS:\n"
                 "- Call get_structure first to find a good CSS selector, then pass it as 'selector'.\n"
                 "- Use include_links=false and include_meta=false if you only need text.\n"
-                "- If you get ROBOTS_BLOCKED, call set_antidetection with respect_robots_txt=false.\n"
+                "- If you get ROBOTS_BLOCKED, choose a URL/path allowed by robots.txt.\n"
                 "- If you get FETCH_ERROR, try set_antidetection with profile='stealth' or 'browser_tls'.\n\n"
                 "Errors: INVALID_URL, FETCH_ERROR, ROBOTS_BLOCKED, EXTRACTION_ERROR, "
                 "MAX_DEPTH_EXCEEDED, MAX_PAGES_EXCEEDED."
@@ -485,8 +527,8 @@ async def handle_list_tools() -> List[Tool]:
                     "depth": {
                         "type": "integer",
                         "description": (
-                            "Crawl depth. 1 = single page (inline response). "
-                            "2 = page + its links (auto-session). 3 = two levels of links (auto-session). "
+                            "Crawl depth. 1 = single page. "
+                            "2 = page + its linked pages. 3 = two levels of links. "
                             "Default 1."
                         ),
                         "minimum": 1,
@@ -523,9 +565,11 @@ async def handle_list_tools() -> List[Tool]:
                     "session": {
                         "type": "boolean",
                         "description": (
-                            "Force session storage and return a session_id instead of inline content. "
-                            "Automatically enabled when depth > 1. Useful for large single pages too."
+                            "Control session storage. true = store server-side and return a session_id. "
+                            "false (default) = return all content inline. "
+                            "Parameters are honored exactly — no auto-override."
                         ),
+                        "default": False,
                     },
                     "filter_noise": {
                         "type": "boolean",
@@ -541,7 +585,22 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "integer",
                         "description": "Session chunk size in characters (default 4000). Only used when session storage is active.",
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    "max_bytes": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum allowed response size in bytes for inline content. "
+                            "If the response exceeds this limit, returns CONTENT_TOO_LARGE error. "
+                            "Default: 5242880 (5 MB)."
+                        ),
+                        "default": 5242880,
+                    },
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Per-request fetch timeout in seconds (default 60).",
+                        "minimum": 1,
+                        "default": 60,
+                    },
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["url"],
             },
@@ -575,6 +634,14 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "string",
                         "description": "Full URL to analyze (must include http:// or https://)",
                     },
+                    "selector": {
+                        "type": "string",
+                        "description": (
+                            "CSS selector to scope the analysis to a specific part of the page. "
+                            "Examples: '#main-content', 'article', '.post-body'. "
+                            "Omit to analyze the full page."
+                        ),
+                    },
                     "include_navigation": {
                         "type": "boolean",
                         "description": "Include navigation menus and their links (default: true)",
@@ -595,7 +662,13 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "boolean",
                         "description": "Include heading hierarchy (h1\u2013h6) as an outline (default true).",
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Per-request fetch timeout in seconds (default 60).",
+                        "minimum": 1,
+                        "default": 60,
+                    },
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["url"],
             },
@@ -612,7 +685,7 @@ async def handle_list_tools() -> List[Tool]:
                 "Get metadata for a stored scraping session. "
                 "Returns: {success, session_id, url, total_chunks, total_size, created_at}.\n\n"
                 "Use this to check how many chunks a session has and its total size. "
-                "The session_id comes from a previous get_content call (depth>1, or session=true).\n\n"
+                "The session_id comes from a previous get_content call with session=true.\n\n"
                 "NEXT STEPS: Call get_session(session_id) to get the full text, "
                 "or get_session_chunk(session_id, chunk_index) for one chunk at a time.\n\n"
                 "Errors: SESSION_NOT_FOUND."
@@ -624,7 +697,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "string",
                         "description": "Session GUID returned by get_content when session storage was used.",
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["session_id"],
             },
@@ -657,7 +730,7 @@ async def handle_list_tools() -> List[Tool]:
                         "type": "integer",
                         "description": "Zero-based chunk index (0 to total_chunks-1).",
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["session_id", "chunk_index"],
             },
@@ -681,7 +754,7 @@ async def handle_list_tools() -> List[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    **AUTH_TOKENS_SCHEMA,
+                    **AUTH_TOKEN_SCHEMA,
                 },
             },
             annotations=ToolAnnotations(
@@ -730,7 +803,7 @@ async def handle_list_tools() -> List[Tool]:
                             "Auto-detected from GOFR_DIG_WEB_URL env or defaults to localhost if omitted."
                         ),
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["session_id"],
             },
@@ -770,7 +843,13 @@ async def handle_list_tools() -> List[Tool]:
                         ),
                         "default": 5242880,
                     },
-                    **AUTH_TOKENS_SCHEMA,
+                    "timeout_seconds": {
+                        "type": "number",
+                        "description": "Timeout in seconds for retrieving and joining chunks (default 60).",
+                        "minimum": 1,
+                        "default": 60,
+                    },
+                    **AUTH_TOKEN_SCHEMA,
                 },
                 "required": ["session_id"],
             },
@@ -787,35 +866,123 @@ async def handle_list_tools() -> List[Tool]:
 @app.call_tool()
 async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle tool invocations."""
-    logger.info("Tool called", tool=name, args=arguments)
+    started = time.perf_counter()
+    invocation_context = _tool_args_summary(name, arguments)
+    invoked_msg = _tool_invoked_message(name, arguments)
+    logger.info(
+        f"tool.invoke {invoked_msg}",
+        **invocation_context,
+    )
+
+    def _emit_completed(result: str, detail: str = "") -> None:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        host = invocation_context.get("url_host", "")
+        target = f" {host}" if host else ""
+        extra = f" — {detail}" if detail else ""
+        logger.info(
+            f"tool.done {name}{target} {result} {duration_ms}ms{extra}",
+            event="tool_completed",
+            tool=name,
+            operation=name,
+            stage="respond",
+            dependency="mcp",
+            result=result,
+            duration_ms=duration_ms,
+            request_id=invocation_context.get("request_id"),
+            session_id=invocation_context.get("session_id"),
+            url=invocation_context.get("url"),
+            url_host=invocation_context.get("url_host"),
+        )
 
     if name == "ping":
-        return [_json_text({"status": "ok", "service": "gofr-dig"})]
+        from datetime import datetime, timezone
+
+        from app.build_info import BUILD_NUMBER
+
+        now = datetime.now(timezone.utc).astimezone()
+        timestamp = now.strftime("%a %b %Y %H:%M:%S %Z")
+        _emit_completed("success")
+        return [
+            _json_text(
+                {
+                    "status": "ok",
+                    "service": "gofr-dig",
+                    "build": BUILD_NUMBER,
+                    "timestamp": timestamp,
+                }
+            )
+        ]
+
+    # Inbound rate limiting (skip for ping)
+    auth_token = arguments.get("auth_token")
+    identity: str | None = None
+    try:
+        identity = _resolve_group_from_token(auth_token)
+    except Exception:
+        pass  # auth errors handled by individual handlers
+    limiter = get_rate_limiter()
+    allowed, rate_info = limiter.check(identity)
+    if not allowed:
+        logger.warning(
+            "Inbound rate limit exceeded",
+            event="rate_limit_inbound_exceeded",
+            operation=name,
+            stage="auth",
+            dependency="rate_limiter",
+            result="denied",
+            remediation="wait_for_rate_limit_window_reset",
+            request_id=invocation_context.get("request_id"),
+            group=identity,
+        )
+        _emit_completed("rate_limited")
+        return _error_response(
+            "RATE_LIMIT_EXCEEDED",
+            f"Rate limit exceeded: {rate_info['limit']} calls per window. "
+            f"Retry in {rate_info['reset_seconds']}s.",
+            rate_info,
+        )
 
     if name == "set_antidetection":
-        return await _handle_set_antidetection(arguments)
+        result = await _handle_set_antidetection(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_content":
-        return await _handle_get_content(arguments)
+        result = await _handle_get_content(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_structure":
-        return await _handle_get_structure(arguments)
+        result = await _handle_get_structure(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_session_info":
-        return await _handle_get_session_info(arguments)
+        result = await _handle_get_session_info(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_session_chunk":
-        return await _handle_get_session_chunk(arguments)
+        result = await _handle_get_session_chunk(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "list_sessions":
-        return await _handle_list_sessions(arguments)
+        result = await _handle_list_sessions(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_session_urls":
-        return await _handle_get_session_urls(arguments)
+        result = await _handle_get_session_urls(arguments)
+        _emit_completed("success")
+        return result
 
     if name == "get_session":
-        return await _handle_get_session(arguments)
+        result = await _handle_get_session(arguments)
+        _emit_completed("success")
+        return result
 
+    _emit_completed("unknown_tool")
     return _error_response("UNKNOWN_TOOL", f"Unknown tool: {name}", {"tool_name": name})
 
 
@@ -846,9 +1013,6 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
     state.custom_headers = arguments.get("custom_headers", {})
     state.custom_user_agent = arguments.get("custom_user_agent")
 
-    if "respect_robots_txt" in arguments:
-        state.respect_robots_txt = arguments["respect_robots_txt"]
-
     if "rate_limit_delay" in arguments:
         delay = arguments["rate_limit_delay"]
         if delay < 0:
@@ -859,21 +1023,21 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
             )
         state.rate_limit_delay = delay
 
-    if "max_tokens" in arguments:
-        max_tokens = arguments["max_tokens"]
-        if max_tokens < 1000:
+    if "max_response_chars" in arguments:
+        max_response_chars = arguments["max_response_chars"]
+        if max_response_chars < 4000:
             return _error_response(
-                "INVALID_MAX_TOKENS",
-                "max_tokens must be at least 1000",
-                {"provided_value": max_tokens},
+                "INVALID_MAX_RESPONSE_CHARS",
+                "max_response_chars must be at least 4000",
+                {"provided_value": max_response_chars},
             )
-        if max_tokens > 1000000:
+        if max_response_chars > 4000000:
             return _error_response(
-                "INVALID_MAX_TOKENS",
-                "max_tokens cannot exceed 1000000",
-                {"provided_value": max_tokens},
+                "INVALID_MAX_RESPONSE_CHARS",
+                "max_response_chars cannot exceed 4000000",
+                {"provided_value": max_response_chars},
             )
-        state.max_tokens = max_tokens
+        state.max_response_chars = max_response_chars
 
     # Create manager to get profile info
     manager = AntiDetectionManager(
@@ -888,9 +1052,9 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
         "status": "configured",
         "profile": profile.value,
         "profile_info": manager.get_profile_info(),
-        "respect_robots_txt": state.respect_robots_txt,
+        "respect_robots_txt": True,
         "rate_limit_delay": state.rate_limit_delay,
-        "max_tokens": state.max_tokens,
+        "max_response_chars": state.max_response_chars,
     }
 
     if profile == AntiDetectionProfile.CUSTOM:
@@ -898,7 +1062,14 @@ async def _handle_set_antidetection(arguments: Dict[str, Any]) -> List[TextConte
         if state.custom_user_agent:
             response["custom_user_agent"] = state.custom_user_agent
 
-    logger.info("Anti-detection configured", profile=profile.value)
+    logger.info(
+        f"antidetection.configured profile={profile.value}, "
+        f"rate_limit_delay={state.rate_limit_delay}s, "
+        f"max_response_chars={state.max_response_chars:,}",
+        profile=profile.value,
+        rate_limit_delay=state.rate_limit_delay,
+        max_response_chars=state.max_response_chars,
+    )
     return [_json_text(response)]
 
 
@@ -925,10 +1096,23 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     filter_noise = arguments.get("filter_noise", True)
     use_session = arguments.get("session", False)
     chunk_size = arguments.get("chunk_size")
+    max_bytes = arguments.get("max_bytes", 5_242_880)  # 5 MB default
+    timeout_seconds = arguments.get("timeout_seconds", 60)
 
-    # Auto-force session mode for multi-page crawls (depth > 1 produces large payloads)
-    if depth > 1:
-        use_session = True
+    # When crawling (depth > 1), always extract links internally so we can
+    # discover sub-pages.  The caller's include_links preference only controls
+    # whether links appear in the *response*.
+    extract_links = True if depth > 1 else include_links
+
+    if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+        return _error_response(
+            "INVALID_ARGUMENT",
+            "timeout_seconds must be a positive number",
+            {"provided_value": timeout_seconds},
+        )
+
+    # Honor parameters exactly — no auto-overrides.
+    # session defaults to false; caller must explicitly set session=true.
 
     # Get base domain for internal link filtering
     base_domain = urlparse(url).netloc
@@ -960,7 +1144,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 }
 
         # Fetch the URL
-        fetch_result = await fetch_url(page_url)
+        fetch_result = await fetch_url(page_url, timeout_seconds=timeout_seconds)
         if not fetch_result.success:
             error_code = _classify_fetch_error(fetch_result)
             return {
@@ -990,7 +1174,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
             content = extractor.extract(
                 fetch_result.content,
                 url=fetch_result.url,
-                include_links=include_links,
+                include_links=extract_links,
                 include_images=include_images,
                 include_meta=include_meta,
                 filter_noise=filter_noise,
@@ -1021,7 +1205,10 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
         if content.headings:
             page_data["headings"] = content.headings
 
-        if include_links and content.links:
+        # Always attach links to page_data so get_internal_links() can
+        # discover sub-pages during depth > 1 crawls.  We strip them from the
+        # final response later if the caller set include_links=false.
+        if extract_links and content.links:
             page_data["links"] = content.links
 
         if include_images and content.images:
@@ -1055,14 +1242,18 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
         # Handle session storage if requested
         if use_session:
+            # Strip links before storing if caller didn't ask for them
+            if not include_links:
+                page_data.pop("links", None)
+
             manager = get_session_manager()
             # Use provided chunk_size or default to 4000
             c_size = chunk_size if chunk_size is not None else 4000
 
-            # Resolve group from auth_tokens
-            auth_tokens = arguments.get("auth_tokens")
+            # Resolve group from auth_token
+            auth_token = arguments.get("auth_token")
             try:
-                group = _resolve_group_from_tokens(auth_tokens)
+                group = _resolve_group_from_token(auth_token)
             except Exception as e:
                 if AuthError is not None and isinstance(e, AuthError):
                     return _error_response("AUTH_ERROR", str(e))
@@ -1070,7 +1261,10 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
             try:
                 session_id = manager.create_session(
-                    url=url, content=page_data, chunk_size=c_size, group=group,
+                    url=url,
+                    content=page_data,
+                    chunk_size=c_size,
+                    group=group,
                 )
 
                 # Get session info for response
@@ -1080,6 +1274,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                     _json_text(
                         {
                             "success": True,
+                            "response_type": "session",
                             "session_id": session_id,
                             "url": url,
                             "total_chunks": info["total_chunks"],
@@ -1093,17 +1288,43 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 return _exception_response(e)
             except Exception as e:
                 logger.error("Failed to create session", error=str(e), url=url)
-                return _error_response("SESSION_ERROR", f"Failed to create session: {e}", {"url": url})
+                return _error_response(
+                    "SESSION_ERROR", f"Failed to create session: {e}", {"url": url}
+                )
 
-        # Apply token limit truncation
+        # Strip links the caller didn't ask for (they were only kept for crawling)
+        if not include_links:
+            page_data.pop("links", None)
+
+        # Apply character limit truncation
         state = get_scraping_state()
-        page_data, truncated = _apply_token_limit(page_data, state.max_tokens)
+        page_data, truncated = _apply_char_limit(page_data, state.max_response_chars)
 
+        page_data["response_type"] = "inline"
+
+        # Enforce max_bytes limit on serialized response
+        serialized = json.dumps(page_data)
+        if len(serialized.encode("utf-8")) > max_bytes:
+            return _error_response(
+                "CONTENT_TOO_LARGE",
+                (
+                    f"Inline response is {len(serialized.encode('utf-8')):,} bytes, "
+                    f"exceeding max_bytes limit of {max_bytes:,}. "
+                    f"Use session=true to store content server-side, "
+                    f"or increase max_bytes."
+                ),
+                {"url": url, "max_bytes": max_bytes},
+            )
+
+        text_len = len(page_data.get("text", ""))
+        links_n = len(page_data.get("links", []))
+        host = _safe_url_host(url) or url
         logger.info(
-            "Content extracted",
+            f"content.extracted {host} — {text_len:,} chars, {links_n} links"
+            + (" [truncated]" if truncated else ""),
             url=url,
-            text_length=len(page_data.get("text", "")),
-            links_count=len(page_data.get("links", [])),
+            text_length=text_len,
+            links_count=links_n,
             truncated=truncated,
         )
         return [_json_text(page_data)]
@@ -1128,7 +1349,13 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
     }
 
     # Depth 1: Start URL
-    logger.info("Crawling depth 1", url=url)
+    crawl_host = _safe_url_host(url) or url
+    logger.info(
+        f"crawl.depth1 {crawl_host} — fetching root page",
+        url=url,
+        depth=1,
+        max_pages_per_level=max_pages_per_level,
+    )
     root_page = await fetch_single_page(url)
     if root_page is None or not root_page.get("success"):
         return [_json_text(root_page or {"success": False, "error": "Failed to fetch root URL"})]
@@ -1158,7 +1385,12 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
     # Depth 2
     if depth >= 2 and current_level_links:
-        logger.info("Crawling depth 2", num_links=len(current_level_links))
+        logger.info(
+            f"crawl.depth2 {crawl_host} — fetching {len(current_level_links)} linked pages",
+            url=url,
+            depth=2,
+            num_links=len(current_level_links),
+        )
         next_level_links: list[str] = []
         depth_2_count = 0
 
@@ -1180,7 +1412,12 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
     # Depth 3
     if depth >= 3 and current_level_links:
-        logger.info("Crawling depth 3", num_links=len(current_level_links))
+        logger.info(
+            f"crawl.depth3 {crawl_host} — fetching {len(current_level_links)} linked pages",
+            url=url,
+            depth=3,
+            num_links=len(current_level_links),
+        )
         depth_3_count = 0
 
         for link_url in current_level_links:
@@ -1199,13 +1436,19 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
     # Handle session storage if requested (same as depth=1)
     if use_session:
+        # Strip links before storing if caller didn't ask for them
+        if not include_links:
+            results.pop("links", None)
+            for page in results.get("pages", []):
+                page.pop("links", None)
+
         manager = get_session_manager()
         c_size = chunk_size if chunk_size is not None else 4000
 
-        # Resolve group from auth_tokens
-        auth_tokens = arguments.get("auth_tokens")
+        # Resolve group from auth_token
+        auth_token = arguments.get("auth_token")
         try:
-            group = _resolve_group_from_tokens(auth_tokens)
+            group = _resolve_group_from_token(auth_token)
         except Exception as e:
             if AuthError is not None and isinstance(e, AuthError):
                 return _error_response("AUTH_ERROR", str(e))
@@ -1213,7 +1456,10 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
 
         try:
             session_id = manager.create_session(
-                url=url, content=results, chunk_size=c_size, group=group,
+                url=url,
+                content=results,
+                chunk_size=c_size,
+                group=group,
             )
             info = manager.get_session_info(session_id)
 
@@ -1221,6 +1467,7 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
                 _json_text(
                     {
                         "success": True,
+                        "response_type": "session",
                         "session_id": session_id,
                         "url": url,
                         "total_chunks": info["total_chunks"],
@@ -1236,18 +1483,40 @@ async def _handle_get_content(arguments: Dict[str, Any]) -> List[TextContent]:
             return _exception_response(e)
         except Exception as e:
             logger.error("Failed to create session", error=str(e), url=url)
-            return _error_response(
-                "SESSION_ERROR", f"Failed to create session: {e}", {"url": url}
-            )
+            return _error_response("SESSION_ERROR", f"Failed to create session: {e}", {"url": url})
 
-    results, truncated = _apply_token_limit_multipage(results, state.max_tokens)
+    # Strip links the caller didn't ask for (they were only kept for crawling)
+    if not include_links:
+        results.pop("links", None)
+        for page in results.get("pages", []):
+            page.pop("links", None)
 
+    results["response_type"] = "inline"
+    results, truncated = _apply_char_limit_multipage(results, state.max_response_chars)
+
+    # Enforce max_bytes limit on serialized response
+    serialized = json.dumps(results)
+    if len(serialized.encode("utf-8")) > max_bytes:
+        return _error_response(
+            "CONTENT_TOO_LARGE",
+            (
+                f"Inline response is {len(serialized.encode('utf-8')):,} bytes, "
+                f"exceeding max_bytes limit of {max_bytes:,}. "
+                f"Use session=true to store content server-side, "
+                f"or increase max_bytes."
+            ),
+            {"url": url, "max_bytes": max_bytes, "total_pages": results["summary"]["total_pages"]},
+        )
+
+    total_p = results["summary"]["total_pages"]
+    total_t = results["summary"]["total_text_length"]
     logger.info(
-        "Crawl completed",
+        f"crawl.done {crawl_host} — {total_p} pages, {total_t:,} chars, depth={depth}"
+        + (" [truncated]" if truncated else ""),
         start_url=url,
         depth=depth,
-        total_pages=results["summary"]["total_pages"],
-        total_text_length=results["summary"]["total_text_length"],
+        total_pages=total_p,
+        total_text_length=total_t,
         truncated=truncated,
     )
 
@@ -1283,9 +1552,18 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     include_external_links = arguments.get("include_external_links", True)
     include_forms = arguments.get("include_forms", True)
     include_outline = arguments.get("include_outline", True)
+    selector = arguments.get("selector")
+    timeout_seconds = arguments.get("timeout_seconds", 60)
+
+    if not isinstance(timeout_seconds, (int, float)) or timeout_seconds <= 0:
+        return _error_response(
+            "INVALID_ARGUMENT",
+            "timeout_seconds must be a positive number",
+            {"provided_value": timeout_seconds},
+        )
 
     # Fetch the URL
-    fetch_result = await fetch_url(url)
+    fetch_result = await fetch_url(url, timeout_seconds=timeout_seconds)
     if not fetch_result.success:
         error_code = _classify_fetch_error(fetch_result)
         return _error_response(
@@ -1298,7 +1576,7 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     from app.scraping.structure import StructureAnalyzer
 
     analyzer = StructureAnalyzer()
-    structure = analyzer.analyze(fetch_result.content, url=fetch_result.url)
+    structure = analyzer.analyze(fetch_result.content, url=fetch_result.url, selector=selector)
 
     if not structure.success:
         return _error_response(
@@ -1334,8 +1612,10 @@ async def _handle_get_structure(arguments: Dict[str, Any]) -> List[TextContent]:
     if structure.meta:
         response["meta"] = structure.meta
 
+    s_host = _safe_url_host(url) or url
     logger.info(
-        "Structure analyzed",
+        f"structure.done {s_host} — {len(structure.sections)} sections, "
+        f"{len(structure.internal_links)} internal + {len(structure.external_links)} external links",
         url=url,
         sections_count=len(structure.sections),
         nav_links_count=len(structure.navigation),
@@ -1351,9 +1631,9 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
     if not session_id:
         return _error_response("INVALID_ARGUMENT", "session_id is required")
 
-    auth_tokens = arguments.get("auth_tokens")
+    auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_tokens(auth_tokens)
+        group = _resolve_group_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1369,7 +1649,9 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
         if isinstance(e, GofrDigError):
             return _exception_response(e)
         logger.error("Unexpected error in get_session_info", error=str(e), session_id=session_id)
-        return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
+        return _error_response(
+            "SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id}
+        )
 
 
 async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextContent]:
@@ -1382,9 +1664,9 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
     if chunk_index is None:
         return _error_response("INVALID_ARGUMENT", "chunk_index is required")
 
-    auth_tokens = arguments.get("auth_tokens")
+    auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_tokens(auth_tokens)
+        group = _resolve_group_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1399,15 +1681,22 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
             return _error_response("PERMISSION_DENIED", str(e), {"session_id": session_id})
         if isinstance(e, GofrDigError):
             return _exception_response(e)
-        logger.error("Unexpected error in get_session_chunk", error=str(e), session_id=session_id, chunk_index=chunk_index)
-        return _error_response("SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id})
+        logger.error(
+            "Unexpected error in get_session_chunk",
+            error=str(e),
+            session_id=session_id,
+            chunk_index=chunk_index,
+        )
+        return _error_response(
+            "SESSION_ERROR", f"Unexpected error: {e}", {"session_id": session_id}
+        )
 
 
 async def _handle_list_sessions(arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle list_sessions tool call."""
-    auth_tokens = arguments.get("auth_tokens")
+    auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_tokens(auth_tokens)
+        group = _resolve_group_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1454,9 +1743,9 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
     if not session_id:
         return _error_response("INVALID_ARGUMENT", "session_id is required")
 
-    auth_tokens = arguments.get("auth_tokens")
+    auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_tokens(auth_tokens)
+        group = _resolve_group_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1479,13 +1768,11 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
 
         if as_json:
             response["chunks"] = [
-                {"session_id": session_id, "chunk_index": i}
-                for i in range(total_chunks)
+                {"session_id": session_id, "chunk_index": i} for i in range(total_chunks)
             ]
         else:
             response["chunk_urls"] = [
-                f"{base_url}/sessions/{session_id}/chunks/{i}"
-                for i in range(total_chunks)
+                f"{base_url}/sessions/{session_id}/chunks/{i}" for i in range(total_chunks)
             ]
 
         return [_json_text(response)]
@@ -1520,10 +1807,11 @@ async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
         return _error_response("INVALID_ARGUMENT", "session_id is required")
 
     max_bytes = arguments.get("max_bytes", 5_242_880)  # 5 MB default
+    timeout_seconds = arguments.get("timeout_seconds", 60)
 
-    auth_tokens = arguments.get("auth_tokens")
+    auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_tokens(auth_tokens)
+        group = _resolve_group_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1553,9 +1841,29 @@ async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
 
         total_chunks = info["total_chunks"]
         parts = []
-        for i in range(total_chunks):
-            chunk_text = manager.get_chunk(session_id, i, group=group)
-            parts.append(chunk_text)
+
+        async def _read_chunks():
+            for i in range(total_chunks):
+                chunk_text = manager.get_chunk(session_id, i, group=group)
+                parts.append(chunk_text)
+
+        try:
+            await asyncio.wait_for(_read_chunks(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            return _error_response(
+                "TIMEOUT_ERROR",
+                (
+                    f"Timed out after {timeout_seconds}s reading {total_chunks} chunks. "
+                    f"Use get_session_chunk for incremental retrieval, "
+                    f"or increase timeout_seconds."
+                ),
+                {
+                    "session_id": session_id,
+                    "total_chunks": total_chunks,
+                    "chunks_read": len(parts),
+                    "timeout_seconds": timeout_seconds,
+                },
+            )
 
         content = "".join(parts)
 

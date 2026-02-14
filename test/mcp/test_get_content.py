@@ -266,6 +266,32 @@ class TestGetContentMCPTool:
         assert "error" not in data
         assert "ACME" in data["title"] or "ACME" in data["text"]
         assert data["url"] == url
+        assert data["response_type"] == "inline"
+
+    @pytest.mark.asyncio
+    async def test_get_content_session_response_type(self, html_fixture_server):
+        """Session mode should return response_type=session."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        url = html_fixture_server.get_url("index.html")
+        result = await handle_call_tool("get_content", {"url": url, "session": True})
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is True
+        assert data["response_type"] == "session"
+        assert "session_id" in data
+
+    @pytest.mark.asyncio
+    async def test_get_content_invalid_timeout(self, html_fixture_server):
+        """Invalid timeout_seconds should return INVALID_ARGUMENT."""
+        from app.mcp_server.mcp_server import handle_call_tool
+
+        url = html_fixture_server.get_url("index.html")
+        result = await handle_call_tool("get_content", {"url": url, "timeout_seconds": 0})
+
+        data = get_mcp_result_data(result)
+        assert data["success"] is False
+        assert data["error_code"] == "INVALID_ARGUMENT"
 
     @pytest.mark.asyncio
     async def test_get_content_products_page(self, html_fixture_server):

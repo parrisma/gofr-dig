@@ -36,10 +36,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOCKER_DIR="$PROJECT_ROOT/docker"
 
 # ---- Configuration ----------------------------------------------------------
 IMAGE_NAME="gofr-dig-prod:latest"
-COMPOSE_FILE="$SCRIPT_DIR/compose.prod.yml"
+COMPOSE_FILE="$DOCKER_DIR/compose.prod.yml"
 NETWORK_NAME="gofr-net"
 PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
 
@@ -47,6 +48,7 @@ FORCE_BUILD=false
 NO_AUTH=false
 DO_DOWN=false
 PORT_OFFSET=0
+LOGGING_DEGRADED_REASON=""
 
 # ---- Parse arguments --------------------------------------------------------
 while [ $# -gt 0 ]; do
@@ -80,12 +82,139 @@ ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
 warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
 fail()  { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; exit 1; }
 
+vault_local_addr() {
+    local vault_port="${GOFR_VAULT_PORT:-}"
+
+    if [ -z "$vault_port" ] && [ -f "$PORTS_ENV" ]; then
+        vault_port=$(grep -E '^GOFR_VAULT_PORT=' "$PORTS_ENV" | head -n1 | cut -d'=' -f2)
+    fi
+
+    vault_port="${vault_port:-8200}"
+    echo "http://127.0.0.1:${vault_port}"
+}
+
+approle_login_json() {
+    local role_id="$1"
+    local secret_id="$2"
+    local vault_addr="$3"
+    local attempts="${4:-3}"
+    local delay_seconds="${5:-2}"
+    local attempt=1
+    local output=""
+
+    while [ "$attempt" -le "$attempts" ]; do
+        output=$(docker exec \
+            -e VAULT_ADDR="$vault_addr" \
+            gofr-vault vault write -format=json auth/approle/login role_id="$role_id" secret_id="$secret_id" 2>&1)
+
+        if [ $? -eq 0 ] && [ -n "$output" ]; then
+            printf '%s' "$output"
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$attempts" ]; then
+            sleep "$delay_seconds"
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    if [ -n "$output" ]; then
+        printf '%s' "$output" >&2
+    fi
+    return 1
+}
+
+read_json_field() {
+    local file_path="$1"
+    local field_name="$2"
+    python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ''))" "$file_path" "$field_name" 2>/dev/null
+}
+
+fetch_vault_secret_field() {
+    local vault_token="$1"
+    local secret_path="$2"
+    local field_name="$3"
+    local vault_addr="$(vault_local_addr)"
+
+    docker exec \
+        -e VAULT_ADDR="$vault_addr" \
+        -e VAULT_TOKEN="$vault_token" \
+        gofr-vault vault kv get -field="$field_name" "$secret_path" 2>/dev/null || true
+}
+
+bootstrap_logging_sink_env() {
+    local creds_file="$PROJECT_ROOT/secrets/service_creds/gofr-dig.json"
+    local role_id=""
+    local secret_id=""
+    local login_json=""
+    local client_token=""
+    local seq_url=""
+    local seq_api_key=""
+    local vault_addr="$(vault_local_addr)"
+
+    if [ ! -f "$creds_file" ]; then
+        LOGGING_DEGRADED_REASON="approle_creds_missing"
+        warn "Logging sink bootstrap skipped: AppRole creds not found ($creds_file)"
+        return 0
+    fi
+
+    role_id="$(read_json_field "$creds_file" "role_id")"
+    secret_id="$(read_json_field "$creds_file" "secret_id")"
+
+    if [ -z "$role_id" ] || [ -z "$secret_id" ]; then
+        LOGGING_DEGRADED_REASON="approle_creds_invalid"
+        warn "Logging sink bootstrap skipped: invalid AppRole credentials file"
+        return 0
+    fi
+
+    login_json=$(approle_login_json "$role_id" "$secret_id" "$vault_addr" 5 2) || true
+
+    if [ -z "$login_json" ]; then
+        LOGGING_DEGRADED_REASON="approle_login_failed"
+        warn "Logging sink bootstrap skipped: AppRole login failed after retries"
+        return 0
+    fi
+
+    client_token=$(python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('auth', {}).get('client_token', ''))" "$login_json" 2>/dev/null || true)
+    if [ -z "$client_token" ]; then
+        LOGGING_DEGRADED_REASON="approle_token_missing"
+        warn "Logging sink bootstrap skipped: AppRole token missing"
+        return 0
+    fi
+
+    seq_url="$(fetch_vault_secret_field "$client_token" "secret/gofr/config/logging/seq-url" "value")"
+    seq_api_key="$(fetch_vault_secret_field "$client_token" "secret/gofr/config/logging/seq-api-key" "value")"
+
+    if [ -n "$seq_url" ]; then
+        export GOFR_DIG_SEQ_URL="$seq_url"
+    fi
+    if [ -n "$seq_api_key" ]; then
+        export GOFR_DIG_SEQ_API_KEY="$seq_api_key"
+    fi
+
+    if [ -n "${GOFR_DIG_SEQ_URL:-}" ] && [ -n "${GOFR_DIG_SEQ_API_KEY:-}" ]; then
+        ok "Logging sink secrets loaded from Vault via AppRole"
+    else
+        LOGGING_DEGRADED_REASON="logging_secret_missing"
+        warn "Logging sink secrets not fully available — continuing in degraded mode"
+    fi
+}
+
 # ---- Prerequisites ----------------------------------------------------------
 echo ""
 info "Checking prerequisites..."
 
 if ! command -v docker &>/dev/null; then
     fail "docker is not installed or not on PATH"
+fi
+
+# ---- Logging sink secret bootstrap (AppRole-based, optional) ---------------
+if docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
+    info "Loading logging sink credentials from Vault (AppRole)..."
+    bootstrap_logging_sink_env
+else
+    LOGGING_DEGRADED_REASON="vault_unavailable"
+    warn "Vault unavailable; continuing with local logging only"
 fi
 
 if ! docker info &>/dev/null 2>&1; then
@@ -145,8 +274,9 @@ else
         if [ -f "$VAULT_ROOT_TOKEN_FILE" ] && docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
             info "Loading JWT secret from Vault..."
             VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE")
+            VAULT_ADDR_LOCAL="$(vault_local_addr)"
             JWT_SECRET=$(docker exec \
-                -e VAULT_ADDR=http://127.0.0.1:${GOFR_VAULT_PORT} \
+                -e VAULT_ADDR="$VAULT_ADDR_LOCAL" \
                 -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" \
                 gofr-vault vault kv get -field=value secret/gofr/config/jwt-signing-secret 2>/dev/null) || true
 
@@ -217,7 +347,14 @@ if [ "$FORCE_BUILD" = true ] || ! docker image inspect "$IMAGE_NAME" &>/dev/null
     VERSION=$(grep -m1 '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
     VERSION="${VERSION:-0.0.0}"
 
+    # Compute git-based build number: <commit-count>.<short-hash>
+    BUILD_NUMBER="$(git -C "$PROJECT_ROOT" rev-list --count HEAD 2>/dev/null).$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null)"
+    BUILD_NUMBER="${BUILD_NUMBER:-0.unknown}"
+    info "Build number: $BUILD_NUMBER"
+
     docker build \
+        --no-cache \
+        --build-arg GOFR_DIG_BUILD_NUMBER="$BUILD_NUMBER" \
         -f docker/Dockerfile.prod \
         -t "gofr-dig-prod:${VERSION}" \
         -t "$IMAGE_NAME" \
@@ -303,4 +440,9 @@ echo "  Logs:    docker compose -f $COMPOSE_FILE logs -f"
 echo "  Status:  docker compose -f $COMPOSE_FILE ps"
 echo "  Stop:    $0 --down"
 echo "  Rebuild: $0 --build"
+if [ -n "${GOFR_DIG_SEQ_URL:-}" ] && [ -n "${GOFR_DIG_SEQ_API_KEY:-}" ]; then
+    echo "  Logging sink: SEQ configured via Vault AppRole"
+else
+    echo "  Logging sink: DEGRADED (stdout/file only, reason: ${LOGGING_DEGRADED_REASON:-unspecified})"
+fi
 echo ""

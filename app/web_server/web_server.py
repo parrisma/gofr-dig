@@ -90,6 +90,44 @@ class GofrDigWebServer:
 
         return app
 
+    @staticmethod
+    def _request_id(request: Request) -> str | None:
+        return request.headers.get("x-request-id")
+
+    def _log_session_issue(
+        self,
+        level: str,
+        message: str,
+        request: Request,
+        session_id: str,
+        *,
+        error_code: str,
+        side_effect: str,
+        remediation: str,
+        cause_type: str,
+        chunk_index: int | None = None,
+    ) -> None:
+        fields = {
+            "event": "session_retrieval_failed",
+            "operation": request.url.path,
+            "stage": "respond",
+            "dependency": "storage",
+            "request_id": self._request_id(request),
+            "session_id": session_id,
+            "chunk_index": chunk_index,
+            "root_cause_code": error_code,
+            "error_code": error_code,
+            "cause_type": cause_type,
+            "side_effect": side_effect,
+            "impact": side_effect,
+            "remediation": remediation,
+        }
+        payload = {k: v for k, v in fields.items() if v is not None}
+        if level == "warning":
+            logger.warning(message, **payload)
+        else:
+            logger.error(message, **payload)
+
     async def root(self, request: Request) -> JSONResponse:
         """Root endpoint."""
         return JSONResponse({
@@ -125,16 +163,38 @@ class GofrDigWebServer:
             if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
                 return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
             if isinstance(e, SessionNotFoundError):
-                logger.warning("Session not found", session_id=session_id)
+                self._log_session_issue(
+                    "warning",
+                    "Session not found",
+                    request,
+                    session_id,
+                    error_code="SESSION_NOT_FOUND",
+                    side_effect="session_not_accessible",
+                    remediation="verify_session_id_or_create_a_new_session",
+                    cause_type=type(e).__name__,
+                )
                 return JSONResponse(error_to_web_response(e), status_code=404)
             if isinstance(e, GofrDigError):
-                logger.error("Session error", session_id=session_id, error=str(e))
+                self._log_session_issue(
+                    "error",
+                    "Session error",
+                    request,
+                    session_id,
+                    error_code=getattr(e, "error_code", "SESSION_ERROR"),
+                    side_effect="session_info_not_returned",
+                    remediation="review_error_code_and_retry_with_valid_session",
+                    cause_type=type(e).__name__,
+                )
                 return JSONResponse(error_to_web_response(e), status_code=400)
-            logger.error(
+            self._log_session_issue(
+                "error",
                 "Unexpected error in get_session_info",
-                session_id=session_id,
-                error=str(e),
-                cause=type(e).__name__,
+                request,
+                session_id,
+                error_code="INTERNAL_ERROR",
+                side_effect="session_info_not_returned",
+                remediation="inspect_server_logs_and_retry_request",
+                cause_type=type(e).__name__,
             )
             return JSONResponse(
                 {"error": {"code": "INTERNAL_ERROR", "message": str(e)}},
@@ -159,29 +219,54 @@ class GofrDigWebServer:
             if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
                 return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
             if isinstance(e, SessionNotFoundError):
-                logger.warning("Session not found", session_id=session_id)
+                self._log_session_issue(
+                    "warning",
+                    "Session not found",
+                    request,
+                    session_id,
+                    error_code="SESSION_NOT_FOUND",
+                    side_effect="session_chunk_not_returned",
+                    remediation="verify_session_id_or_create_a_new_session",
+                    cause_type=type(e).__name__,
+                    chunk_index=chunk_index,
+                )
                 return JSONResponse(error_to_web_response(e), status_code=404)
             if isinstance(e, SessionValidationError):
-                logger.warning(
+                self._log_session_issue(
+                    "warning",
                     "Invalid chunk index",
-                    session_id=session_id,
+                    request,
+                    session_id,
+                    error_code=getattr(e, "error_code", "SESSION_VALIDATION_ERROR"),
+                    side_effect="session_chunk_not_returned",
+                    remediation="provide_chunk_index_within_session_range",
+                    cause_type=type(e).__name__,
                     chunk_index=chunk_index,
                 )
                 return JSONResponse(error_to_web_response(e), status_code=400)
             if isinstance(e, GofrDigError):
-                logger.error(
+                self._log_session_issue(
+                    "error",
                     "Session error",
-                    session_id=session_id,
+                    request,
+                    session_id,
+                    error_code=getattr(e, "error_code", "SESSION_ERROR"),
+                    side_effect="session_chunk_not_returned",
+                    remediation="review_error_code_and_retry_with_valid_session",
+                    cause_type=type(e).__name__,
                     chunk_index=chunk_index,
-                    error=str(e),
                 )
                 return JSONResponse(error_to_web_response(e), status_code=400)
-            logger.error(
+            self._log_session_issue(
+                "error",
                 "Unexpected error in get_session_chunk",
-                session_id=session_id,
+                request,
+                session_id,
+                error_code="INTERNAL_ERROR",
+                side_effect="session_chunk_not_returned",
+                remediation="inspect_server_logs_and_retry_request",
+                cause_type=type(e).__name__,
                 chunk_index=chunk_index,
-                error=str(e),
-                cause=type(e).__name__,
             )
             return JSONResponse(
                 {"error": {"code": "INTERNAL_ERROR", "message": str(e)}},
@@ -233,16 +318,38 @@ class GofrDigWebServer:
             if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
                 return JSONResponse({"error": {"code": "PERMISSION_DENIED", "message": str(e)}}, status_code=403)
             if isinstance(e, SessionNotFoundError):
-                logger.warning("Session not found", session_id=session_id)
+                self._log_session_issue(
+                    "warning",
+                    "Session not found",
+                    request,
+                    session_id,
+                    error_code="SESSION_NOT_FOUND",
+                    side_effect="session_urls_not_returned",
+                    remediation="verify_session_id_or_create_a_new_session",
+                    cause_type=type(e).__name__,
+                )
                 return JSONResponse(error_to_web_response(e), status_code=404)
             if isinstance(e, GofrDigError):
-                logger.error("Session error", session_id=session_id, error=str(e))
+                self._log_session_issue(
+                    "error",
+                    "Session error",
+                    request,
+                    session_id,
+                    error_code=getattr(e, "error_code", "SESSION_ERROR"),
+                    side_effect="session_urls_not_returned",
+                    remediation="review_error_code_and_retry_with_valid_session",
+                    cause_type=type(e).__name__,
+                )
                 return JSONResponse(error_to_web_response(e), status_code=400)
-            logger.error(
+            self._log_session_issue(
+                "error",
                 "Unexpected error in get_session_urls",
-                session_id=session_id,
-                error=str(e),
-                cause=type(e).__name__,
+                request,
+                session_id,
+                error_code="INTERNAL_ERROR",
+                side_effect="session_urls_not_returned",
+                remediation="inspect_server_logs_and_retry_request",
+                cause_type=type(e).__name__,
             )
             return JSONResponse(
                 {"error": {"code": "INTERNAL_ERROR", "message": str(e)}},

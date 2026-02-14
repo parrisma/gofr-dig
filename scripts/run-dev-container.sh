@@ -7,6 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOCKER_DIR="$PROJECT_ROOT/docker"
 # gofr-common is now a git submodule at lib/gofr-common, no separate mount needed
 
 # Detect host user's UID/GID (the dev container must match so bind-mounted

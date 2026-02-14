@@ -34,9 +34,11 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     "CONNECTION_ERROR": "Could not connect to the server. Verify the URL and check network connectivity.",
     
     # Robots.txt and access
-    "ROBOTS_BLOCKED": "Access blocked by robots.txt. Use set_antidetection with respect_robots_txt=false to override (use responsibly).",
+    "ROBOTS_BLOCKED": "Access blocked by robots.txt. Choose a URL/path that is allowed by the target site's robots policy.",
     "ACCESS_DENIED": "The server denied access. Try using a different anti-detection profile or custom headers.",
     "RATE_LIMITED": "Too many requests. Increase rate_limit_delay in set_antidetection settings.",
+    "RATE_LIMIT_EXCEEDED": "Inbound rate limit exceeded. Wait and retry after the reset window.",
+    "SSRF_BLOCKED": "The URL resolves to a private/internal IP. Requests to internal networks are blocked for security.",
     
     # Content extraction errors
     "SELECTOR_NOT_FOUND": "The CSS selector matched no elements. Verify the selector syntax and that the element exists on the page.",
@@ -58,10 +60,10 @@ RECOVERY_STRATEGIES: Dict[str, str] = {
     
     # Argument validation
     "INVALID_ARGUMENT": "A required argument is missing or invalid. Check the tool schema for required parameters.",
-    "INVALID_MAX_TOKENS": "max_tokens must be between 1000 and 1000000. Default is 100000 (~400K characters).",
+    "INVALID_MAX_RESPONSE_CHARS": "max_response_chars must be between 4000 and 4000000. Default is 400000 characters.",
     
     # Auth errors
-    "AUTH_ERROR": "Provide a valid JWT token in the auth_tokens parameter.",
+    "AUTH_ERROR": "Provide a valid JWT token in the auth_token parameter.",
     "PERMISSION_DENIED": "Your token's groups do not include the group that owns this session.",
 
     # Session errors

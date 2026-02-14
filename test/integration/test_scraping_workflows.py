@@ -247,29 +247,28 @@ class TestRobotsComplianceWorkflow:
                 assert content.get("robots_blocked") is not True
 
     @pytest.mark.asyncio
-    async def test_disable_robots_compliance(self, html_fixture_server):
-        """Workflow: Agent disables robots.txt checking for special access."""
+    async def test_robots_compliance_cannot_be_disabled(self, html_fixture_server):
+        """Workflow: robots.txt checking remains enabled even when requested off."""
         base_url = html_fixture_server.base_url
 
         async with streamable_http_client(MCP_URL) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
 
-                # Disable robots.txt compliance
+                # Attempt to disable robots.txt compliance
                 antidetect_result = await session.call_tool(
                     "set_antidetection", {"profile": "none", "respect_robots_txt": False}
                 )
                 antidetect = parse_json(antidetect_result)
-                assert antidetect["respect_robots_txt"] is False
+                assert antidetect["respect_robots_txt"] is True
 
-                # Now /admin/ should not be blocked (though may 404)
+                # /admin/ should still be blocked by robots
                 content_result = await session.call_tool(
                     "get_content", {"url": f"{base_url}/admin/page.html"}
                 )
                 content = parse_json(content_result)
 
-                # Should NOT be robots_blocked (may fail for other reasons like 404)
-                assert content.get("robots_blocked") is not True
+                assert content.get("robots_blocked") is True or content.get("success") is False
 
 
 class TestLinkDiscoveryWorkflow:
@@ -413,7 +412,7 @@ class TestFullScrapingPipeline:
 
                 # Step 1: Configure anti-detection
                 await session.call_tool(
-                    "set_antidetection", {"profile": "balanced", "respect_robots_txt": True}
+                    "set_antidetection", {"profile": "balanced"}
                 )
 
                 # Step 2: Get homepage structure
@@ -556,7 +555,7 @@ class TestAntiDetectionProfiles:
                 assert config["success"] is True
                 assert config["profile"] == "custom"
                 assert config["rate_limit_delay"] == 2.0
-                assert config["respect_robots_txt"] is False
+                assert config["respect_robots_txt"] is True
 
 
 class TestContentExtractionOptions:

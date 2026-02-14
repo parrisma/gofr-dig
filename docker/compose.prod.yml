@@ -6,10 +6,10 @@
 #
 # Usage:
 #   Use start-prod.sh to start production stack (recommended):
-#     ./docker/start-prod.sh               # Auto-builds image, starts stack
-#     ./docker/start-prod.sh --no-auth     # Start without JWT authentication
-#     ./docker/start-prod.sh --port-offset 100  # Shift host ports by N
-#     ./docker/start-prod.sh --build       # Force-rebuild image first
+#     ./scripts/start-prod.sh               # Auto-builds image, starts stack
+#     ./scripts/start-prod.sh --no-auth     # Start without JWT authentication
+#     ./scripts/start-prod.sh --port-offset 100  # Shift host ports by N
+#     ./scripts/start-prod.sh --build       # Force-rebuild image first
 #
 #   Or manually:
 #     cd docker
@@ -62,7 +62,10 @@ services:
       - GOFR_DIG_ENV=PROD
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
       - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_JSON=${GOFR_DIG_LOG_JSON:-true}
       - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-mcp.log
+      - GOFR_DIG_SEQ_URL=${GOFR_DIG_SEQ_URL:-}
+      - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth — passed through from host environment or start-prod.sh
@@ -111,8 +114,9 @@ services:
       - GOFR_DIG_ENV=PROD
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
       - GOFR_DIG_MCPO_PORT=${GOFR_DIG_MCPO_PORT}
-      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
-      - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-mcpo.log
+      # Note: mcpo binary is a third-party proxy; it does not use our
+      # StructuredLogger so LOG_FILE / LOG_JSON / SEQ vars are not needed.
+      # Its stdout/stderr are captured by Docker's log driver.
     ports:
       - "${GOFR_DIG_MCPO_HOST_PORT:-${GOFR_DIG_MCPO_PORT}}:${GOFR_DIG_MCPO_PORT}"
     volumes:
@@ -150,7 +154,10 @@ services:
       - GOFR_DIG_ENV=PROD
       - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
       - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_JSON=${GOFR_DIG_LOG_JSON:-true}
       - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-web.log
+      - GOFR_DIG_SEQ_URL=${GOFR_DIG_SEQ_URL:-}
+      - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth — same as MCP
@@ -197,4 +204,4 @@ volumes:
   gofr-secrets:
     name: gofr-secrets
     external: true
-    # Shared secrets volume — created by run-dev.sh or migrate_secrets_to_volume.sh
+    # Shared secrets volume — created by run-dev-container.sh or migrate_secrets_to_volume.sh

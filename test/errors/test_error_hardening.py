@@ -291,15 +291,15 @@ class TestRecoveryStrategiesCoverage:
     # Codes emitted via _error_response() calls in mcp_server.py
     DIRECTLY_EMITTED = {
         "UNKNOWN_TOOL", "INVALID_PROFILE", "INVALID_RATE_LIMIT",
-        "INVALID_MAX_TOKENS", "INVALID_URL", "SESSION_ERROR",
+        "INVALID_MAX_RESPONSE_CHARS", "INVALID_URL", "SESSION_ERROR",
         "INVALID_ARGUMENT", "ROBOTS_BLOCKED", "EXTRACTION_ERROR",
-        "AUTH_ERROR", "PERMISSION_DENIED",
+        "AUTH_ERROR", "PERMISSION_DENIED", "RATE_LIMIT_EXCEEDED",
     }
 
     # Codes emitted via _classify_fetch_error()
     FETCH_CLASSIFIED = {
         "URL_NOT_FOUND", "ACCESS_DENIED", "RATE_LIMITED",
-        "FETCH_ERROR", "TIMEOUT_ERROR", "CONNECTION_ERROR",
+        "FETCH_ERROR", "TIMEOUT_ERROR", "CONNECTION_ERROR", "SSRF_BLOCKED",
     }
 
     # Codes emitted via _classify_extraction_error()

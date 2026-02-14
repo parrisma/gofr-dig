@@ -56,6 +56,9 @@ services:
       - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-DEBUG}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
+      - GOFR_DIG_ALLOW_PRIVATE_URLS=${GOFR_DIG_ALLOW_PRIVATE_URLS:-false}
+      - GOFR_DIG_RATE_LIMIT_CALLS=${GOFR_DIG_RATE_LIMIT_CALLS:-60}
+      - GOFR_DIG_RATE_LIMIT_WINDOW=${GOFR_DIG_RATE_LIMIT_WINDOW:-60}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}

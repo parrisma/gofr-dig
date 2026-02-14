@@ -120,12 +120,13 @@ class StructureAnalyzer:
         """
         self.parser = parser
 
-    def analyze(self, html: str, url: str = "") -> PageStructure:
+    def analyze(self, html: str, url: str = "", selector: str | None = None) -> PageStructure:
         """Analyze the structure of an HTML page.
 
         Args:
             html: HTML content to analyze
             url: Source URL for resolving relative links
+            selector: Optional CSS selector to scope analysis to a subtree
 
         Returns:
             PageStructure with analysis results
@@ -136,25 +137,36 @@ class StructureAnalyzer:
             logger.error("Failed to parse HTML for structure analysis", error=str(e))
             return PageStructure(url=url, error=f"Parse error: {str(e)}")
 
+        analysis_root: BeautifulSoup | Tag = soup
+        if selector:
+            try:
+                selected = soup.select_one(selector)
+            except Exception as e:
+                logger.error("Invalid selector for structure analysis", selector=selector, error=str(e))
+                return PageStructure(url=url, error=f"Invalid selector '{selector}': {str(e)}")
+            if selected is None:
+                return PageStructure(url=url, error=f"Selector '{selector}' did not match any elements")
+            analysis_root = selected
+
         # Extract basic info
         title = self._extract_title(soup)
         language = self._extract_language(soup)
         meta = self._extract_meta(soup)
 
         # Find semantic sections
-        sections = self._find_sections(soup)
+        sections = self._find_sections(analysis_root)
 
         # Extract navigation
-        navigation = self._extract_navigation(soup, url)
+        navigation = self._extract_navigation(analysis_root, url)
 
         # Categorize all links
-        internal_links, external_links = self._categorize_links(soup, url)
+        internal_links, external_links = self._categorize_links(analysis_root, url)
 
         # Find forms
-        forms = self._find_forms(soup)
+        forms = self._find_forms(analysis_root)
 
         # Build document outline
-        outline = self._build_outline(soup)
+        outline = self._build_outline(analysis_root)
 
         return PageStructure(
             url=url,
@@ -202,7 +214,7 @@ class StructureAnalyzer:
                 meta[name_str] = content_str
         return meta
 
-    def _find_sections(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    def _find_sections(self, soup: BeautifulSoup | Tag) -> List[Dict[str, Any]]:
         """Find semantic sections in the page."""
         sections = []
 
@@ -248,7 +260,7 @@ class StructureAnalyzer:
         return text
 
     def _extract_navigation(
-        self, soup: BeautifulSoup, base_url: str
+        self, soup: BeautifulSoup | Tag, base_url: str
     ) -> List[Dict[str, str]]:
         """Extract navigation links."""
         nav_links = []
@@ -295,7 +307,7 @@ class StructureAnalyzer:
         return nav_links
 
     def _categorize_links(
-        self, soup: BeautifulSoup, base_url: str
+        self, soup: BeautifulSoup | Tag, base_url: str
     ) -> tuple[List[Dict[str, str]], List[Dict[str, str]]]:
         """Categorize links as internal or external."""
         internal = []
@@ -338,7 +350,7 @@ class StructureAnalyzer:
 
         return internal, external
 
-    def _find_forms(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    def _find_forms(self, soup: BeautifulSoup | Tag) -> List[Dict[str, Any]]:
         """Find and analyze forms on the page."""
         forms = []
 
@@ -371,7 +383,7 @@ class StructureAnalyzer:
 
         return forms
 
-    def _build_outline(self, soup: BeautifulSoup) -> List[Dict[str, Any]]:
+    def _build_outline(self, soup: BeautifulSoup | Tag) -> List[Dict[str, Any]]:
         """Build a document outline from headings."""
         outline = []
 
@@ -400,15 +412,16 @@ def get_analyzer() -> StructureAnalyzer:
     return _analyzer
 
 
-def analyze_structure(html: str, url: str = "") -> PageStructure:
+def analyze_structure(html: str, url: str = "", selector: str | None = None) -> PageStructure:
     """Convenience function to analyze page structure.
 
     Args:
         html: HTML content to analyze
         url: Source URL
+        selector: Optional CSS selector to scope analysis
 
     Returns:
         PageStructure with analysis results
     """
     analyzer = get_analyzer()
-    return analyzer.analyze(html, url)
+    return analyzer.analyze(html, url, selector)

@@ -5,7 +5,7 @@
 # Standardized test runner script for the gofr-dig project.
 #
 # Integration tests require running MCP/Web/MCPO services. This script uses
-# docker/start-dev.sh to launch ephemeral Docker services on test ports
+# scripts/start-test-env.sh to launch ephemeral Docker services on test ports
 # (test ports from gofr_ports.env: MCP/MCPO/Web) via compose.dev.yml.
 #
 # Usage:
@@ -45,7 +45,7 @@ PROJECT_NAME="gofr-dig"
 TEST_DIR="test"
 COVERAGE_SOURCE="app"
 LOG_DIR="${PROJECT_ROOT}/logs"
-START_DEV_SCRIPT="${PROJECT_ROOT}/docker/start-dev.sh"
+START_DEV_SCRIPT="${PROJECT_ROOT}/scripts/start-test-env.sh"
 
 # Activate virtual environment
 VENV_DIR="${PROJECT_ROOT}/.venv"
@@ -136,10 +136,10 @@ print_header() {
 start_services() {
     echo -e "${GREEN}=== Starting Ephemeral Docker Services ===${NC}"
     if [ ! -x "${START_DEV_SCRIPT}" ]; then
-        echo -e "${RED}start-dev.sh not found or not executable: ${START_DEV_SCRIPT}${NC}"
+        echo -e "${RED}start-test-env.sh not found or not executable: ${START_DEV_SCRIPT}${NC}"
         exit 1
     fi
-    "${START_DEV_SCRIPT}"
+    "${START_DEV_SCRIPT}" --build
     echo ""
 }
 

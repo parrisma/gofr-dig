@@ -13,8 +13,8 @@ from typing import Dict, Optional
 from app.scraping.antidetection import AntiDetectionProfile
 
 
-# Default token limit for content extraction (approx 100k tokens ~ 400k chars)
-DEFAULT_MAX_TOKENS = 100000
+# Default response size limit in characters (approx 400k chars)
+DEFAULT_MAX_RESPONSE_CHARS = 400000
 
 
 @dataclass
@@ -23,14 +23,15 @@ class ScrapingState:
 
     This state is maintained across tool invocations within an MCP session.
     It stores anti-detection settings and other scraping configuration.
+    Settings reset when the MCP connection is closed or the server restarts.
 
     Attributes:
         antidetection_profile: Current anti-detection profile (stealth/balanced/none/custom)
         custom_headers: Custom headers when using 'custom' profile
         custom_user_agent: Custom User-Agent when using 'custom' profile
-        respect_robots_txt: Whether to respect robots.txt (default True)
+        respect_robots_txt: Whether to respect robots.txt (always True, not configurable)
         rate_limit_delay: Delay in seconds between requests (default 1.0)
-        max_tokens: Maximum tokens to return in responses (default 100000)
+        max_response_chars: Maximum characters to return in responses (default 400000)
     """
 
     antidetection_profile: AntiDetectionProfile = AntiDetectionProfile.BALANCED
@@ -38,7 +39,7 @@ class ScrapingState:
     custom_user_agent: Optional[str] = None
     respect_robots_txt: bool = True
     rate_limit_delay: float = 1.0
-    max_tokens: int = DEFAULT_MAX_TOKENS
+    max_response_chars: int = DEFAULT_MAX_RESPONSE_CHARS
 
 
 # Global singleton instance for the scraping state

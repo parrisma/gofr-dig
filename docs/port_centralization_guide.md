@@ -202,7 +202,7 @@ EXPOSE ${GOFR_DIG_MCP_PORT:-0}
 ### 3.10 Compose files
 
 Compose files should **already** use `${GOFR_DIG_MCP_PORT}` (set by the
-`start-prod.sh` / `start-dev.sh` wrapper that sources `gofr_ports.env`).
+`start-prod.sh` / `start-test-env.sh` wrapper that sources `gofr_ports.env`).
 
 Fix any vault URL defaults:
 ```yaml

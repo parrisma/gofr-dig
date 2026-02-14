@@ -13,10 +13,10 @@
 #   6. Runs health checks to verify services are up
 #
 # Usage:
-#   ./start-dev.sh                     # Start (auto-builds if image missing)
-#   ./start-dev.sh --build             # Force rebuild before starting
-#   ./start-dev.sh --port-offset 100   # Shift host ports by N
-#   ./start-dev.sh --down              # Stop and remove all dev services
+#   ./start-test-env.sh                     # Start (auto-builds if image missing)
+#   ./start-test-env.sh --build             # Force rebuild before starting
+#   ./start-test-env.sh --port-offset 100   # Shift host ports by N
+#   ./start-test-env.sh --down              # Stop and remove all dev services
 #
 # Notes:
 #   - This script only manages the dev compose stack (mcp/mcpo/web)
@@ -29,10 +29,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOCKER_DIR="$PROJECT_ROOT/docker"
 
 # ---- Configuration ----------------------------------------------------------
 IMAGE_NAME="gofr-dig-prod:latest"
-COMPOSE_FILE="$SCRIPT_DIR/compose.dev.yml"
+COMPOSE_FILE="$DOCKER_DIR/compose.dev.yml"
 NETWORK_NAME="gofr-test-net"
 PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
 
@@ -161,6 +162,9 @@ fi
 echo ""
 info "Starting gofr-dig dev stack..."
 
+export GOFR_DIG_ALLOW_PRIVATE_URLS=true
+export GOFR_DIG_RATE_LIMIT_CALLS=100000
+export GOFR_DIG_RATE_LIMIT_WINDOW=60
 docker compose -f "$COMPOSE_FILE" up -d
 
 # ---- Health check -----------------------------------------------------------

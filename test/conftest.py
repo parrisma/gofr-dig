@@ -213,6 +213,9 @@ def configure_test_auth_environment():
     """
     os.environ["GOFR_DIG_JWT_SECRET"] = TEST_JWT_SECRET
     os.environ["GOFR_DIG_AUTH_BACKEND"] = "vault"
+    os.environ["GOFR_DIG_ALLOW_PRIVATE_URLS"] = "true"
+    os.environ.setdefault("GOFR_DIG_RATE_LIMIT_CALLS", "100000")
+    os.environ.setdefault("GOFR_DIG_RATE_LIMIT_WINDOW", "60")
 
     # Default to local test vault if not already set
     vault_port = os.environ.get("GOFR_VAULT_PORT_TEST", "")
@@ -228,6 +231,7 @@ def configure_test_auth_environment():
     os.environ.pop("GOFR_DIG_AUTH_BACKEND", None)
     os.environ.pop("GOFR_DIG_VAULT_URL", None)
     os.environ.pop("GOFR_DIG_VAULT_TOKEN", None)
+    os.environ.pop("GOFR_DIG_ALLOW_PRIVATE_URLS", None)
 
 
 # ============================================================================
@@ -348,7 +352,7 @@ class HTMLFixtureServer:
                                         get_url() / base_url (default 127.0.0.1)
     """
 
-    def __init__(self, port: int = 8766):
+    def __init__(self, port: int = 0):
         self.port = port
         self._bind_host = os.environ.get("GOFR_DIG_FIXTURE_HOST", "0.0.0.0")
         self._external_host = os.environ.get("GOFR_DIG_FIXTURE_EXTERNAL_HOST", "127.0.0.1")
@@ -371,7 +375,12 @@ class HTMLFixtureServer:
             def log_message(self, format, *args):  # noqa: A002, ARG002
                 pass  # Suppress logging
 
-        self._server = http.server.HTTPServer((self._bind_host, self.port), Handler)
+        class ReusableHTTPServer(http.server.HTTPServer):
+            allow_reuse_address = True
+
+        self._server = ReusableHTTPServer((self._bind_host, self.port), Handler)
+        # If port=0 was requested, capture the OS-assigned free port.
+        self.port = int(self._server.server_port)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
 
@@ -379,6 +388,7 @@ class HTMLFixtureServer:
         """Stop the HTTP server."""
         if self._server:
             self._server.shutdown()
+            self._server.server_close()
             self._server = None
         if self._thread:
             self._thread.join(timeout=5)
@@ -400,7 +410,7 @@ def html_fixture_server():
     """
     Provide a lightweight HTTP server for serving HTML test fixtures.
 
-    The server serves files from test/fixtures/html directory on port 8766.
+    The server serves files from test/fixtures/html on an ephemeral free port.
     Use html_fixture_server.get_url(path) to get the full URL for a test page.
 
     Available pages:
@@ -420,13 +430,13 @@ def html_fixture_server():
     Usage:
         def test_scrape_page(html_fixture_server):
             url = html_fixture_server.get_url("products.html")
-            # url is "http://127.0.0.1:8766/products.html"
+            # url is "http://127.0.0.1:<dynamic-port>/products.html"
             # Make requests to this URL
 
     Returns:
         HTMLFixtureServer: Server instance with start(), stop(), get_url(), and base_url
     """
-    server = HTMLFixtureServer(port=8766)
+    server = HTMLFixtureServer(port=0)
     server.start()
 
     yield server
@@ -440,12 +450,12 @@ def html_fixture_server_session():
     Session-scoped HTML fixture server for tests that need persistent server.
 
     Same as html_fixture_server but lives for the entire test session.
-    Uses port 8767 to avoid conflicts with function-scoped fixture.
+    Uses an ephemeral free port selected by the OS.
 
     Returns:
         HTMLFixtureServer: Server instance
     """
-    server = HTMLFixtureServer(port=8767)
+    server = HTMLFixtureServer(port=0)
     server.start()
 
     yield server

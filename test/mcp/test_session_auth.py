@@ -1,7 +1,7 @@
-"""Tests for group-based session access control via MCP auth_tokens parameter.
+"""Tests for group-based session access control via MCP auth_token parameter.
 
 Covers:
-- Anonymous (no auth_tokens) → group=None
+- Anonymous (no auth_token) → group=None
 - Valid token → session tagged with group
 - Group match → access allowed
 - Group mismatch → PERMISSION_DENIED
@@ -22,7 +22,7 @@ from gofr_common.storage.exceptions import PermissionDeniedError
 
 from app.mcp_server.mcp_server import (
     handle_call_tool,
-    _resolve_group_from_tokens,
+    _resolve_group_from_token,
 )
 from app.session.manager import SessionManager
 from conftest import _create_test_auth_service, _build_vault_client
@@ -86,31 +86,31 @@ def _create_token(groups: list[str], auth_service=None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_group_from_tokens unit tests
+# _resolve_group_from_token unit tests
 # ---------------------------------------------------------------------------
 
 
-class TestResolveGroupFromTokens:
-    """Unit tests for the _resolve_group_from_tokens helper."""
+class TestResolveGroupFromToken:
+    """Unit tests for the _resolve_group_from_token helper."""
 
     def test_none_when_auth_disabled(self):
         """auth_service=None (--no-auth) → always returns None."""
         with patch("app.mcp_server.mcp_server.auth_service", None):
-            assert _resolve_group_from_tokens(["anything"]) is None
+            assert _resolve_group_from_token("anything") is None
 
     def test_none_when_no_tokens(self):
-        """No tokens provided → anonymous (None)."""
+        """No token provided → anonymous (None)."""
         svc = _make_auth_service()
         with patch("app.mcp_server.mcp_server.auth_service", svc):
-            assert _resolve_group_from_tokens(None) is None
-            assert _resolve_group_from_tokens([]) is None
+            assert _resolve_group_from_token(None) is None
+            assert _resolve_group_from_token("") is None
 
     def test_returns_first_group(self):
         """Valid token with groups → returns first group."""
         svc = _make_auth_service()
         token = _create_token(["team-a", "team-b"], svc)
         with patch("app.mcp_server.mcp_server.auth_service", svc):
-            result = _resolve_group_from_tokens([token])
+            result = _resolve_group_from_token(token)
             assert result == "team-a"
 
     def test_strips_bearer_prefix(self):
@@ -118,7 +118,7 @@ class TestResolveGroupFromTokens:
         svc = _make_auth_service()
         token = _create_token(["team-x"], svc)
         with patch("app.mcp_server.mcp_server.auth_service", svc):
-            result = _resolve_group_from_tokens([f"Bearer {token}"])
+            result = _resolve_group_from_token(f"Bearer {token}")
             assert result == "team-x"
 
     def test_invalid_token_raises_auth_error(self):
@@ -126,15 +126,7 @@ class TestResolveGroupFromTokens:
         svc = _make_auth_service()
         with patch("app.mcp_server.mcp_server.auth_service", svc):
             with pytest.raises(AuthError):
-                _resolve_group_from_tokens(["garbage-jwt"])
-
-    def test_tries_next_on_auth_error(self):
-        """If first token is bad but second is valid, uses second."""
-        svc = _make_auth_service()
-        good_token = _create_token(["team-ok"], svc)
-        with patch("app.mcp_server.mcp_server.auth_service", svc):
-            result = _resolve_group_from_tokens(["bad-token", good_token])
-            assert result == "team-ok"
+                _resolve_group_from_token("garbage-jwt")
 
 
 # ---------------------------------------------------------------------------
@@ -143,11 +135,11 @@ class TestResolveGroupFromTokens:
 
 
 class TestMCPSessionAuthHandlers:
-    """Test auth_tokens parameter wiring in MCP session tool handlers."""
+    """Test auth_token parameter wiring in MCP session tool handlers."""
 
     @pytest.mark.asyncio
     async def test_no_auth_tokens_passes_none_group(self):
-        """No auth_tokens → group=None passed to SessionManager."""
+        """No auth_token → group=None passed to SessionManager."""
         mgr = _make_session_manager_mock(group=None)
         with patch("app.mcp_server.mcp_server.session_manager", mgr), \
              patch("app.mcp_server.mcp_server.auth_service", None):
@@ -161,7 +153,7 @@ class TestMCPSessionAuthHandlers:
 
     @pytest.mark.asyncio
     async def test_valid_token_passes_group(self):
-        """Valid auth_tokens → extracted group passed to SessionManager."""
+        """Valid auth_token → extracted group passed to SessionManager."""
         svc = _make_auth_service()
         token = _create_token(["team-a"], svc)
         mgr = _make_session_manager_mock(group="team-a")
@@ -170,7 +162,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             await handle_call_tool(
                 "get_session_info",
-                {"session_id": "s1", "auth_tokens": [token]},
+                {"session_id": "s1", "auth_token": token},
             )
             mgr.get_session_info.assert_called_with("s1", group="team-a")
 
@@ -186,7 +178,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             result = await handle_call_tool(
                 "get_session_info",
-                {"session_id": "s1", "auth_tokens": [token]},
+                {"session_id": "s1", "auth_token": token},
             )
             data = json.loads(result[0].text)  # type: ignore[index]
             assert data["success"] is False
@@ -194,7 +186,7 @@ class TestMCPSessionAuthHandlers:
 
     @pytest.mark.asyncio
     async def test_invalid_token_returns_auth_error(self):
-        """Bad auth_tokens → AUTH_ERROR response."""
+        """Bad auth_token → AUTH_ERROR response."""
         svc = _make_auth_service()
         mgr = _make_session_manager_mock()
 
@@ -202,7 +194,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             result = await handle_call_tool(
                 "get_session_info",
-                {"session_id": "s1", "auth_tokens": ["invalid-jwt"]},
+                {"session_id": "s1", "auth_token": "invalid-jwt"},
             )
             data = json.loads(result[0].text)  # type: ignore[index]
             assert data["success"] is False
@@ -219,7 +211,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             await handle_call_tool(
                 "get_session_chunk",
-                {"session_id": "s1", "chunk_index": 0, "auth_tokens": [token]},
+                {"session_id": "s1", "chunk_index": 0, "auth_token": token},
             )
             mgr.get_chunk.assert_called_with("s1", 0, group="team-c")
 
@@ -235,7 +227,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             result = await handle_call_tool(
                 "get_session_chunk",
-                {"session_id": "s1", "chunk_index": 0, "auth_tokens": [token]},
+                {"session_id": "s1", "chunk_index": 0, "auth_token": token},
             )
             data = json.loads(result[0].text)  # type: ignore[index]
             assert data["error_code"] == "PERMISSION_DENIED"
@@ -251,7 +243,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", svc):
             await handle_call_tool(
                 "list_sessions",
-                {"auth_tokens": [token]},
+                {"auth_token": token},
             )
             mgr.list_sessions.assert_called_once_with(group="team-a")
 
@@ -278,7 +270,7 @@ class TestMCPSessionAuthHandlers:
                 {
                     "session_id": "s1",
                     "base_url": TEST_WEB_BASE_URL,
-                    "auth_tokens": [token],
+                    "auth_token": token,
                 },
             )
             mgr.get_session_info.assert_called_with("s1", group="team-d")
@@ -300,7 +292,7 @@ class TestMCPSessionAuthHandlers:
                 {
                     "session_id": "s1",
                     "base_url": TEST_WEB_BASE_URL,
-                    "auth_tokens": [token],
+                    "auth_token": token,
                 },
             )
             data = json.loads(result[0].text)  # type: ignore[index]
@@ -314,7 +306,7 @@ class TestMCPSessionAuthHandlers:
              patch("app.mcp_server.mcp_server.auth_service", None):
             result = await handle_call_tool(
                 "get_session_info",
-                {"session_id": "s1", "auth_tokens": ["garbage"]},
+                {"session_id": "s1", "auth_token": "garbage"},
             )
             # No AUTH_ERROR — auth_service is None so tokens are ignored
             mgr.get_session_info.assert_called_with("s1", group=None)

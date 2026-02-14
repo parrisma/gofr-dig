@@ -401,23 +401,14 @@ class TestRobotsComplianceInTools:
         assert "recovery_strategy" in data
 
     @pytest.mark.asyncio
-    async def test_set_antidetection_controls_robots(self, html_fixture_server):
-        """Test that set_antidetection can enable/disable robots checking."""
+    async def test_set_antidetection_keeps_robots_enabled(self, html_fixture_server):
+        """Test that set_antidetection does not disable robots checking."""
         from app.mcp_server.mcp_server import handle_call_tool
 
         # Disable via set_antidetection
         await handle_call_tool(
             "set_antidetection",
             {"profile": "balanced", "respect_robots_txt": False},
-        )
-
-        state = get_scraping_state()
-        assert state.respect_robots_txt is False
-
-        # Re-enable
-        await handle_call_tool(
-            "set_antidetection",
-            {"profile": "balanced", "respect_robots_txt": True},
         )
 
         state = get_scraping_state()

@@ -54,6 +54,10 @@ RUN chown -R gofr-dig:gofr-dig /home/gofr-dig
 # We only create the directory here so the mount point exists.
 RUN mkdir -p /run/secrets && chown gofr-dig:gofr-dig /run/secrets
 
+# Build number baked at image build time (format: <commit-count>.<short-hash>)
+ARG GOFR_DIG_BUILD_NUMBER=0.unknown
+ENV GOFR_DIG_BUILD_NUMBER=${GOFR_DIG_BUILD_NUMBER}
+
 # Ports are configured at runtime via compose.yml + gofr_ports.env.
 # EXPOSE uses build ARGs so `docker inspect` reflects the correct ports.
 # Pass --build-arg or set in compose build.args to override.
