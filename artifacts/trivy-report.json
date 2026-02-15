@@ -1,0 +1,237 @@
+{
+  "target_image": "gofr-dig-prod:latest",
+  "scanned_at_utc": "2026-02-15T05:44:17.892802+00:00",
+  "findings": [
+    {
+      "vulnerability_id": "CVE-2026-0861",
+      "package_name": "libc-bin",
+      "installed_version": "2.41-12+deb13u1",
+      "fixed_version": null,
+      "severity": "HIGH",
+      "title": "glibc: Integer overflow in memalign leads to heap corruption",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-0861",
+      "target": "gofr-dig-prod:latest (debian 13.3)",
+      "status": "affected"
+    },
+    {
+      "vulnerability_id": "CVE-2026-0861",
+      "package_name": "libc6",
+      "installed_version": "2.41-12+deb13u1",
+      "fixed_version": null,
+      "severity": "HIGH",
+      "title": "glibc: Integer overflow in memalign leads to heap corruption",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-0861",
+      "target": "gofr-dig-prod:latest (debian 13.3)",
+      "status": "affected"
+    },
+    {
+      "vulnerability_id": "CVE-2026-25547",
+      "package_name": "@isaacs/brace-expansion",
+      "installed_version": "5.0.0",
+      "fixed_version": "5.0.1",
+      "severity": "HIGH",
+      "title": "brace-expansion: brace-expansion: Denial of Service via unbounded brace range expansion",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-25547",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-25547",
+      "package_name": "@isaacs/brace-expansion",
+      "installed_version": "5.0.0",
+      "fixed_version": "5.0.1",
+      "severity": "HIGH",
+      "title": "brace-expansion: brace-expansion: Denial of Service via unbounded brace range expansion",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-25547",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2025-64756",
+      "package_name": "glob",
+      "installed_version": "10.4.5",
+      "fixed_version": "11.1.0, 10.5.0",
+      "severity": "HIGH",
+      "title": "glob: glob: Command Injection Vulnerability via Malicious Filenames",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2025-64756",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2025-64756",
+      "package_name": "glob",
+      "installed_version": "11.0.3",
+      "fixed_version": "11.1.0, 10.5.0",
+      "severity": "HIGH",
+      "title": "glob: glob: Command Injection Vulnerability via Malicious Filenames",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2025-64756",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-23745",
+      "package_name": "tar",
+      "installed_version": "7.5.1",
+      "fixed_version": "7.5.3",
+      "severity": "HIGH",
+      "title": "node-tar: tar: node-tar: Arbitrary file overwrite and symlink poisoning via unsanitized linkpaths in archives",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-23745",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-23950",
+      "package_name": "tar",
+      "installed_version": "7.5.1",
+      "fixed_version": "7.5.4",
+      "severity": "HIGH",
+      "title": "node-tar: tar: node-tar: Arbitrary file overwrite via Unicode path collision race condition",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-23950",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-24842",
+      "package_name": "tar",
+      "installed_version": "7.5.1",
+      "fixed_version": "7.5.7",
+      "severity": "HIGH",
+      "title": "node-tar: tar: node-tar: Arbitrary file creation via path traversal bypass in hardlink security check",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-24842",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-24842",
+      "package_name": "tar",
+      "installed_version": "7.5.4",
+      "fixed_version": "7.5.7",
+      "severity": "HIGH",
+      "title": "node-tar: tar: node-tar: Arbitrary file creation via path traversal bypass in hardlink security check",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-24842",
+      "target": "Node.js",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-26007",
+      "package_name": "cryptography",
+      "installed_version": "46.0.3",
+      "fixed_version": "46.0.5",
+      "severity": "HIGH",
+      "title": "cryptography: cryptography Subgroup Attack Due to Missing Subgroup Validation for SECT Curves",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-26007",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-23949",
+      "package_name": "jaraco.context",
+      "installed_version": "5.3.0",
+      "fixed_version": "6.1.0",
+      "severity": "HIGH",
+      "title": "jaraco.context: jaraco.context: Path traversal via malicious tar archives",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-23949",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-24486",
+      "package_name": "python-multipart",
+      "installed_version": "0.0.20",
+      "fixed_version": "0.0.22",
+      "severity": "HIGH",
+      "title": "python-multipart: Python-Multipart: Arbitrary file write via path traversal vulnerability",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-24486",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2025-62727",
+      "package_name": "starlette",
+      "installed_version": "0.45.3",
+      "fixed_version": "0.49.1",
+      "severity": "HIGH",
+      "title": "starlette: Starlette DoS via Range header merging",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2025-62727",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2025-62727",
+      "package_name": "starlette",
+      "installed_version": "0.45.3",
+      "fixed_version": "0.49.1",
+      "severity": "HIGH",
+      "title": "starlette: Starlette DoS via Range header merging",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2025-62727",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-21441",
+      "package_name": "urllib3",
+      "installed_version": "2.6.2",
+      "fixed_version": "2.6.3",
+      "severity": "HIGH",
+      "title": "urllib3: urllib3 vulnerable to decompression-bomb safeguard bypass when following HTTP redirects (streaming API)",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-21441",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-24049",
+      "package_name": "wheel",
+      "installed_version": "0.45.1",
+      "fixed_version": "0.46.2",
+      "severity": "HIGH",
+      "title": "wheel: wheel: Privilege Escalation or Arbitrary Code Execution via malicious wheel file unpacking",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-24049",
+      "target": "Python",
+      "status": "fixed"
+    },
+    {
+      "vulnerability_id": "CVE-2026-24049",
+      "package_name": "wheel",
+      "installed_version": "0.45.1",
+      "fixed_version": "0.46.2",
+      "severity": "HIGH",
+      "title": "wheel: wheel: Privilege Escalation or Arbitrary Code Execution via malicious wheel file unpacking",
+      "primary_url": "https://avd.aquasec.com/nvd/cve-2026-24049",
+      "target": "Python",
+      "status": "fixed"
+    }
+  ],
+  "counts_by_severity": {
+    "UNKNOWN": 0,
+    "LOW": 0,
+    "MEDIUM": 0,
+    "HIGH": 18,
+    "CRITICAL": 0
+  },
+  "policy_decision": "fail",
+  "fail_reasons": [
+    "HIGH:CVE-2025-62727 pkg=starlette fixed=0.49.1",
+    "HIGH:CVE-2025-64756 pkg=glob fixed=11.1.0, 10.5.0",
+    "HIGH:CVE-2026-0861 pkg=libc-bin fixed=no-fix-available",
+    "HIGH:CVE-2026-0861 pkg=libc6 fixed=no-fix-available",
+    "HIGH:CVE-2026-21441 pkg=urllib3 fixed=2.6.3",
+    "HIGH:CVE-2026-23745 pkg=tar fixed=7.5.3",
+    "HIGH:CVE-2026-23949 pkg=jaraco.context fixed=6.1.0",
+    "HIGH:CVE-2026-23950 pkg=tar fixed=7.5.4",
+    "HIGH:CVE-2026-24049 pkg=wheel fixed=0.46.2",
+    "HIGH:CVE-2026-24486 pkg=python-multipart fixed=0.0.22",
+    "HIGH:CVE-2026-24842 pkg=tar fixed=7.5.7",
+    "HIGH:CVE-2026-25547 pkg=@isaacs/brace-expansion fixed=5.0.1",
+    "HIGH:CVE-2026-26007 pkg=cryptography fixed=46.0.5"
+  ],
+  "trivy_version": null,
+  "metadata": {
+    "scan_enabled": true,
+    "severity_filter": [
+      "CRITICAL",
+      "HIGH"
+    ],
+    "fail_on_severity": "HIGH",
+    "ignore_unfixed": false
+  }
+}

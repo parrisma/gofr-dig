@@ -49,6 +49,7 @@ from gofr_common.auth.backends.vault_config import VaultConfig  # noqa: E402
 # Services to provision (role_name → policy_names)
 SERVICES = {
     "gofr-dig": ["gofr-dig-policy", "gofr-dig-logging-policy"],
+    "gofr-admin-control": ["gofr-admin-control-policy"],
 }
 
 

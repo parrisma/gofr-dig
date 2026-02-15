@@ -58,6 +58,11 @@ RUN mkdir -p /home/gofr/.ssh && chmod 700 /home/gofr/.ssh
 # Create venv (will be populated by entrypoint)
 RUN uv venv /home/gofr/devroot/gofr-dig/.venv --python=python3.11
 
+# Install Trivy binary for local container vulnerability scanning
+RUN mkdir -p /home/gofr/devroot/gofr-dig/.tmp/trivy-bin \
+    && curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /home/gofr/devroot/gofr-dig/.tmp/trivy-bin \
+    && chown -R gofr:gofr /home/gofr/devroot/gofr-dig/.tmp
+
 # Ports are configured at runtime via compose.yml + gofr_ports.env.
 # EXPOSE uses build ARGs so `docker inspect` reflects the correct ports.
 # Pass --build-arg or set in compose build.args to override.
