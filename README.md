@@ -5,6 +5,17 @@
 ## Accessing N8N, OpenWebUI
 See **[Getting Started](docs/getting_started.md)** for detailed integration guides for N8N and OpenWebUI.
 
+## New Machine TL;DR
+
+```bash
+git submodule update --init --recursive
+./scripts/bootstrap_gofr_dig.sh --yes
+./lib/gofr-common/scripts/bootstrap_seq.sh
+./scripts/start-prod.sh
+./lib/gofr-common/scripts/auth_manager.sh --docker groups list
+./scripts/run_tests.sh
+```
+
 ## What It Does
 
 | Capability | Description |

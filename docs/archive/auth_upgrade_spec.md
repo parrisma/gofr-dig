@@ -145,3 +145,78 @@ A8. The PermissionDeniedError import should come from gofr_common.storage.except
 - Token migration (old file-based tokens → Vault). Assumed clean cutover.
 - MCPO changes (already passes Bearer header correctly).
 - Changes to session storage itself (only the auth layer that gates access).
+
+---
+
+## 6. GOFR-DIG Reference State (Implemented, Feb 2026)
+
+This section captures what was actually implemented in gofr-dig and should be treated as the alignment target for other GOFR projects.
+
+### 6.1 Vault JWT Source of Truth (completed)
+
+- Auth wrappers no longer depend on `docker/.env` for JWT material.
+- JWT secret is read from Vault path:
+    - `secret/gofr/config/jwt-signing-secret`
+- `docker/.env` was removed from the auth bootstrap/control path.
+
+### 6.2 Runtime vs Admin policy split (completed)
+
+Policy model in `lib/gofr-common/src/gofr_common/auth/policies.py` now separates runtime and admin capabilities:
+
+- Runtime config policy (`POLICY_GOFR_CONFIG_RUNTIME_READ`):
+    - read-only on `secret/data/gofr/config/*`
+- Admin auth policy (`POLICY_GOFR_AUTH_ADMIN`):
+    - CRUD/list on `secret/data/gofr/auth/*`
+    - list/read on `secret/metadata/gofr/auth/*`
+- Admin control policy published as:
+    - `gofr-admin-control-policy`
+
+Runtime service policies (`gofr-mcp-policy`, `gofr-web-policy`, `gofr-dig-policy`) do not include auth write access.
+
+### 6.3 Dedicated admin AppRole and hard cutover (completed)
+
+- Admin role name: `gofr-admin-control`
+- Admin policy name: `gofr-admin-control-policy`
+- `scripts/setup_approle.py` provisions `gofr-admin-control` by default and writes:
+    - `secrets/service_creds/gofr-admin-control.json`
+
+Hard-cutover behavior in wrappers:
+
+- `lib/gofr-common/scripts/auth_manager.sh`
+- `lib/gofr-common/scripts/bootstrap_auth.sh`
+
+Both wrappers now:
+
+1. Require admin creds JSON (`gofr-admin-control.json`) from `secrets/service_creds`.
+2. Perform Vault AppRole login with `role_id`/`secret_id` from that file.
+3. Fail closed with cause/context/recovery output if creds are missing/invalid.
+4. Do not rely on runtime service role auth write permissions.
+
+### 6.4 Bootstrap warning-noise suppression under least privilege (completed)
+
+Because admin-control role is intentionally scoped for auth-management, optional bootstrap steps that require broader rights are now explicitly disabled by wrapper env flags:
+
+- `GOFR_BOOTSTRAP_INSTALL_POLICIES=false`
+- `GOFR_BOOTSTRAP_STORE_JWT_SECRET=false`
+
+Result: no expected permission-denied warning noise during normal `bootstrap_auth.sh --groups-only` operations, without broadening runtime/admin privileges.
+
+### 6.5 Validation evidence from gofr-dig
+
+- Provisioning validated:
+    - `uv run scripts/setup_approle.py`
+- Wrapper command validation:
+    - `./lib/gofr-common/scripts/auth_manager.sh --docker groups list`
+    - `./lib/gofr-common/scripts/bootstrap_auth.sh --docker --groups-only`
+- Full acceptance suite passed after implementation:
+    - `./scripts/run_tests.sh` → `506 passed`
+
+### 6.6 Alignment requirements for other GOFR projects
+
+For cross-project alignment, implement these minimum invariants:
+
+1. JWT secret must come from Vault (`secret/gofr/config/jwt-signing-secret`) not local `.env` files.
+2. Runtime roles must not have auth-domain write permissions.
+3. Auth-management operations must run under dedicated admin AppRole (`gofr-admin-control` equivalent).
+4. Admin wrappers/scripts must fail closed when admin creds are missing/invalid.
+5. Optional bootstrap tasks requiring elevated rights must be explicit and controllable (env flags or equivalent), not implicit side effects.
