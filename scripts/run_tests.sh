@@ -158,6 +158,19 @@ cleanup_environment() {
     echo -e "${GREEN}Cleanup complete${NC}"
 }
 
+run_code_quality_gate() {
+    echo -e "${BLUE}Running code quality gate...${NC}"
+    set +e
+    uv run python -m pytest ${TEST_DIR}/code_quality/test_code_quality.py -v
+    local gate_exit_code=$?
+    set -e
+
+    if [ $gate_exit_code -ne 0 ]; then
+        echo -e "${RED}ALL Code quality issues must be solved before running other tests${NC}"
+        exit $gate_exit_code
+    fi
+}
+
 start_vault_test_container() {
     echo -e "${BLUE}Starting Vault in ephemeral dev mode...${NC}"
 
@@ -413,6 +426,9 @@ if [ "$CLEANUP_ONLY" = true ]; then
     cleanup_environment
     exit 0
 fi
+
+# Fail-fast quality gate before starting services and running other tests
+run_code_quality_gate
 
 # Start Vault for tests
 start_vault_test_container

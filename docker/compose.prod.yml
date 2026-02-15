@@ -181,6 +181,47 @@ services:
       retries: 3
       start_period: 10s
 
+  # ==========================================================================
+  # 4. Housekeeper (Storage Pruning)
+  # ==========================================================================
+  housekeeper:
+    <<: *gofr_dig_common
+    container_name: gofr-dig-housekeeper
+    hostname: gofr-dig-housekeeper
+    user: root
+    working_dir: /home/gofr-dig
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Ensure directories exist and have correct ownership
+        mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/logs
+        chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
+        
+        # Start housekeeping loop
+        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python app/housekeeper.py"
+    environment:
+      - GOFR_DIG_ENV=PROD
+      - GOFR_DIG_LOG_LEVEL=${GOFR_DIG_LOG_LEVEL:-INFO}
+      - GOFR_DIG_LOG_JSON=${GOFR_DIG_LOG_JSON:-true}
+      - GOFR_DIG_LOG_FILE=/home/gofr-dig/logs/gofr-dig-housekeeper.log
+      - GOFR_DIG_SEQ_URL=${GOFR_DIG_SEQ_URL:-}
+      - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
+      # Path config consistent with other services
+      - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
+      - GOFR_DIG_STORAGE=${GOFR_DIG_STORAGE_DIR:-/home/gofr-dig/data/storage}
+      # Check interval and max size
+      - GOFR_DIG_HOUSEKEEPING_INTERVAL_MINS=${GOFR_DIG_HOUSEKEEPING_INTERVAL_MINS:-60}
+      - GOFR_DIG_MAX_STORAGE_MB=${GOFR_DIG_MAX_STORAGE_MB:-1024}
+      - GOFR_DIG_HOUSEKEEPER_LOCK_STALE_SECONDS=${GOFR_DIG_HOUSEKEEPER_LOCK_STALE_SECONDS:-3600}
+    volumes:
+      - gofr-dig-data:/home/gofr-dig/data
+      - gofr-dig-prod-logs:/home/gofr-dig/logs
+      # Secrets not needed for housekeeping unless logging needs them? 
+      # Logging might use SEQ key but that is env var. 
+      # Keeping it consistent just in case shared libs expect paths.
+      - gofr-secrets:/run/gofr-secrets:ro
+    # No ports exposed for housekeeper
+
 # ==========================================================================
 # Networks
 # ==========================================================================

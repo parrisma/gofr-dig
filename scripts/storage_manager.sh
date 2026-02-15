@@ -10,17 +10,32 @@
 #   ./storage_manager.sh --env PROD stats             # Force PROD environment
 #   ./storage_manager.sh --env TEST purge --yes       # Force TEST environment
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+ENV_FILE="$SCRIPT_DIR/gofr-dig.env"
+
+if [[ ! -f "$ENV_FILE" ]]; then
+    echo "Error: environment file not found: $ENV_FILE" >&2
+    exit 1
+fi
+
 # Source centralized configuration (defaults to TEST)
-source "$SCRIPT_DIR/gofr-dig.env"
+source "$ENV_FILE"
 
 # Parse --env flag if provided as first argument
 while [[ $# -gt 0 ]]; do
     case $1 in
         --env)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --env requires a value (PROD or TEST)" >&2
+                exit 1
+            fi
+            if [[ "$2" != "PROD" && "$2" != "TEST" ]]; then
+                echo "Error: invalid --env value '$2' (allowed: PROD, TEST)" >&2
+                exit 1
+            fi
             export GOFR_DIG_ENV="$2"
             shift 2
             ;;
@@ -31,7 +46,22 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Re-source gofr-dig.env with potentially updated GOFR_DIG_ENV to pick up correct paths
-source "$SCRIPT_DIR/gofr-dig.env"
+source "$ENV_FILE"
+
+if [[ -z "${GOFR_DIG_ROOT:-}" ]]; then
+    echo "Error: GOFR_DIG_ROOT is not set after sourcing $ENV_FILE" >&2
+    exit 1
+fi
+
+if [[ -z "${GOFR_DIG_DATA:-}" || -z "${GOFR_DIG_STORAGE:-}" ]]; then
+    echo "Error: GOFR_DIG_DATA and GOFR_DIG_STORAGE must be set after sourcing $ENV_FILE" >&2
+    exit 1
+fi
+
+if [[ $# -eq 0 ]]; then
+    echo "Error: missing command (e.g. list, stats, purge, prune-size)" >&2
+    exit 1
+fi
 
 # Call Python module with environment variables as CLI args
 cd "$GOFR_DIG_ROOT"

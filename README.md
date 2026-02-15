@@ -2,22 +2,8 @@
 
 **Web scraping for AI agents.** gofr-dig is an MCP server that lets LLMs and automation services fetch, extract, and paginate web content — with anti-detection, robots.txt compliance, and session-based chunking for large results.
 
-## Accessing N8N, OPenWebUI
-When N8N and OPenwebUi are run in dev container, find the IP of teh docker host and use that in teh URL NOT localhost
-
-$ ip route | awk '/default/ {print $3}'
-172.22.0.1
-
-so N8N in chrome = http://172.22.0.1:8084/setup
-
-## Connect N8N to gofr-dig (MCP)
-1. In N8N, open your workflow view and click the + button (top right).
-2. Search for and add an MCP Client node.
-3. Set Transport to HTTP Streamable.
-4. Set MCP Endpoint URL to one of these (note the trailing slash):
-  - http://gofr-dig-mcp:8070/mcp/
-  - http://localhost:8070/mcp/
-5. In Tool, choose From List and select the gofr-dig tool (a quick test is ping).
+## Accessing N8N, OpenWebUI
+See **[Getting Started](docs/getting_started.md)** for detailed integration guides for N8N and OpenWebUI.
 
 ## What It Does
 
@@ -32,24 +18,20 @@ so N8N in chrome = http://172.22.0.1:8084/setup
 
 ## Quick Start
 
-### Docker (recommended)
+### 1. One-time Setup
+```bash
+./scripts/bootstrap_gofr_dig.sh
+```
 
+### 2. Run Production
 ```bash
 # Start production stack (MCP :8070, MCPO :8071, Web :8072)
 ./scripts/start-prod.sh
-
-# Without authentication
-./scripts/start-prod.sh --no-auth
-
-# Stop
-./scripts/start-prod.sh --down
 ```
 
-### Local development
-
+### 3. Verification
 ```bash
-uv sync
-uv run python -m app.main_mcp --host 0.0.0.0 --port 8070
+curl http://localhost:8072/health
 ```
 
 ## How It Works
@@ -80,62 +62,21 @@ Multi-page crawls (depth > 1) automatically store results in a session and retur
 | `get_session_chunk` | Retrieve one chunk of stored content |
 | `list_sessions` | Browse all stored sessions |
 | `get_session_urls` | Get HTTP URLs for every chunk (automation fan-out) |
+| `get_session` | Retrieve full content from a session (concatenated) |
 
-Full parameter reference: [docs/TOOLS.md](docs/TOOLS.md)
+Full parameter reference: [docs/tools.md](docs/tools.md)
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
-| [docs/WORKFLOW.md](docs/WORKFLOW.md) | Step-by-step usage guide with examples |
-| [docs/TOOLS.md](docs/TOOLS.md) | Complete MCP tool reference (parameters, returns, errors) |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical internals, error handling, scraping pipeline |
+| [docs/getting_started.md](docs/getting_started.md) | **Start Here**. Installation, usage, and N8N/OpenWebUI integration. |
+| [docs/workflow.md](docs/workflow.md) | Step-by-step usage guide with examples. |
+| [docs/tools.md](docs/tools.md) | Complete MCP tool reference (parameters, returns, errors). |
+| [docs/news_parser.md](docs/news_parser.md) | Deep dive into the deterministic news parser and post-processing. |
+| [docs/architecture.md](docs/architecture.md) | Technical internals, error handling, scraping pipeline. |
 
-## Services
+## Quick Start
 
-| Service | Default Port | Entry Point | Protocol |
-|---|---|---|---|
-| MCP Server | 8070 | `app.main_mcp` | MCP (Streamable HTTP) |
-| MCPO Server | 8071 | `app.main_mcpo` | OpenAPI wrapper over MCP |
-| Web Server | 8072 | `app.main_web` | REST API (sessions, health) |
+### 1. One-time Setup
 
-Ports are configured in `lib/gofr-common/config/gofr_ports.env`.
-
-## Project Structure
-
-```
-app/
-  mcp_server/      MCP tool schemas and handlers
-  web_server/      REST API (session endpoints, health)
-  scraping/        Fetcher, extractor, structure analyzer, anti-detection, robots.txt
-  session/         Session manager (chunked storage)
-  errors/          Error mapper with recovery strategies
-  exceptions/      Typed exception hierarchy
-  logger/          Session-aware structured logging
-  startup/         Boot-time validation
-  config.py        Configuration (paths, env vars)
-  main_mcp.py      MCP server entry point
-  main_mcpo.py     MCPO (OpenAPI) entry point
-  main_web.py      Web server entry point
-docker/            Compose files, Dockerfiles, launcher scripts
-test/              pytest suite (300+ tests)
-docs/              Workflow, tools reference, architecture
-scripts/           Test runner, backup, token management
-```
-
-## Development
-
-```bash
-# Run all tests
-./scripts/run_tests.sh
-
-# Run MCP tests only
-uv run pytest test/mcp/ -v
-
-# Code quality
-uv run ruff check app/ test/
-```
-
-## License
-
-See [LICENSE](LICENSE).
