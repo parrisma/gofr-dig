@@ -289,10 +289,17 @@ build_prod_image() {
 
 ensure_approle_creds() {
   local project_creds="${PROJECT_ROOT}/secrets/service_creds/gofr-dig.json"
+  local project_admin_creds="${PROJECT_ROOT}/secrets/service_creds/gofr-admin-control.json"
   local common_creds="${PROJECT_ROOT}/lib/gofr-common/secrets/service_creds/gofr-dig.json"
+  local common_admin_creds="${PROJECT_ROOT}/lib/gofr-common/secrets/service_creds/gofr-admin-control.json"
 
-  if [[ -f "${project_creds}" || -f "${common_creds}" ]]; then
-    ok "AppRole creds already exist for gofr-dig."
+  if [[ -f "${project_creds}" && -f "${project_admin_creds}" ]]; then
+    ok "AppRole creds already exist for gofr-dig + gofr-admin-control."
+    return 0
+  fi
+
+  if [[ -f "${common_creds}" && -f "${common_admin_creds}" ]]; then
+    ok "AppRole creds already exist for gofr-dig + gofr-admin-control (gofr-common fallback)."
     return 0
   fi
 
@@ -301,7 +308,7 @@ ensure_approle_creds() {
       "Sync your repository and ensure scripts/ exists."
   fi
 
-  info "AppRole creds for gofr-dig not found. Provisioning now..."
+  info "AppRole creds missing or incomplete (gofr-dig and/or gofr-admin-control). Provisioning now..."
   (cd "${PROJECT_ROOT}" && bash ./scripts/ensure_approle.sh)
   ok "AppRole provisioning completed."
 }

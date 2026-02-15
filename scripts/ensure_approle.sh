@@ -2,8 +2,9 @@
 # =============================================================================
 # Ensure gofr-dig Vault AppRole credentials exist
 # =============================================================================
-# Checks for service_creds/gofr-dig.json. If missing and Vault is running
-# + unsealed + root token is available, runs setup_approle.py to provision them.
+# Checks for service_creds/gofr-dig.json AND service_creds/gofr-admin-control.json.
+# If missing and Vault is running + unsealed + root token is available, runs
+# setup_approle.py to provision them.
 #
 # Designed to be called from start-prod.sh (and safe to call repeatedly).
 #
@@ -35,7 +36,9 @@ unset _PORTS_ENV
 SECRETS_DIR="$PROJECT_ROOT/secrets"
 FALLBACK_SECRETS_DIR="$PROJECT_ROOT/lib/gofr-common/secrets"
 CREDS_FILE="$SECRETS_DIR/service_creds/gofr-dig.json"
+ADMIN_CREDS_FILE="$SECRETS_DIR/service_creds/gofr-admin-control.json"
 FALLBACK_CREDS_FILE="$FALLBACK_SECRETS_DIR/service_creds/gofr-dig.json"
+FALLBACK_ADMIN_CREDS_FILE="$FALLBACK_SECRETS_DIR/service_creds/gofr-admin-control.json"
 VAULT_CONTAINER="gofr-vault"
 VAULT_PORT="${GOFR_VAULT_PORT:?GOFR_VAULT_PORT not set — source gofr_ports.env}"
 
@@ -49,15 +52,19 @@ warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
 err()   { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; }
 
 # ---- Already provisioned? ---------------------------------------------------
-if [ -f "$CREDS_FILE" ]; then
+if [ -f "$CREDS_FILE" ] && [ -f "$ADMIN_CREDS_FILE" ]; then
     ok "AppRole credentials exist: $CREDS_FILE"
+    ok "AppRole credentials exist: $ADMIN_CREDS_FILE"
     exit 0
-elif [ -f "$FALLBACK_CREDS_FILE" ]; then
+elif [ -f "$FALLBACK_CREDS_FILE" ] && [ -f "$FALLBACK_ADMIN_CREDS_FILE" ]; then
     ok "AppRole credentials exist: $FALLBACK_CREDS_FILE"
+    ok "AppRole credentials exist: $FALLBACK_ADMIN_CREDS_FILE"
     exit 0
 fi
 
-info "AppRole credentials not found at $CREDS_FILE"
+info "AppRole credentials missing or incomplete. Expected:"
+info "  - $CREDS_FILE"
+info "  - $ADMIN_CREDS_FILE"
 
 if [ "$CHECK_ONLY" = true ]; then
     warn "Check-only mode — not provisioning"
@@ -123,13 +130,18 @@ else
 fi
 
 # ---- Verify -----------------------------------------------------------------
-if [ -f "$CREDS_FILE" ]; then
+if [ -f "$CREDS_FILE" ] && [ -f "$ADMIN_CREDS_FILE" ]; then
     ok "AppRole credentials provisioned: $CREDS_FILE"
+    ok "AppRole credentials provisioned: $ADMIN_CREDS_FILE"
     exit 0
-elif [ -f "$FALLBACK_CREDS_FILE" ]; then
+elif [ -f "$FALLBACK_CREDS_FILE" ] && [ -f "$FALLBACK_ADMIN_CREDS_FILE" ]; then
     ok "AppRole credentials provisioned: $FALLBACK_CREDS_FILE"
+    ok "AppRole credentials provisioned: $FALLBACK_ADMIN_CREDS_FILE"
     exit 0
 else
-    err "setup_approle.py ran but credentials file not created"
+    err "setup_approle.py ran but one or more credentials files were not created"
+    err "Expected both:"
+    err "  $CREDS_FILE"
+    err "  $ADMIN_CREDS_FILE"
     exit 1
 fi
