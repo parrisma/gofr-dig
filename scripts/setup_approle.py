@@ -4,19 +4,23 @@
 Creates the AppRole, attaches policies, and generates service credentials
 that are mounted into containers at /run/secrets/vault_creds.
 
+Modes:
+  (default)        Full provision: install policies, create/update roles,
+                   regenerate credentials and write to disk.
+  --policies-only  Self-healing sync: install policies and create/update roles
+                   without regenerating credentials. Safe for repeated runs
+                   when services are already using existing creds.
+
 Prerequisites:
   - Vault is running and unsealed (gofr-vault container on gofr-net)
   - Vault root token available at secrets/vault_root_token
-  - gofr-dig-policy exists in Vault (run bootstrap_auth.py first)
 
 Usage:
-    # From gofr-dig project root
-    source <(./lib/gofr-common/scripts/auth_env.sh --docker)
+    # Full provision (first-time or credential reset)
     uv run scripts/setup_approle.py
 
-    # Or with explicit env
-    GOFR_VAULT_URL=http://gofr-vault:$GOFR_VAULT_PORT GOFR_VAULT_TOKEN=<root-token> \
-        uv run scripts/setup_approle.py
+    # Policy sync only (safe while services are running)
+    uv run scripts/setup_approle.py --policies-only
 
 Environment Variables:
     GOFR_VAULT_URL      Vault URL (built from GOFR_VAULT_PORT if not set)
@@ -101,8 +105,50 @@ def resolve_vault_config() -> VaultConfig:
     return VaultConfig(url=vault_url, token=vault_token)
 
 
+def sync_policies_and_roles(admin: VaultAdmin) -> None:
+    """Install latest policies and create/update roles (no credential regen)."""
+    log_info("Enabling AppRole auth method (idempotent)...")
+    admin.enable_approle_auth()
+    log_ok("AppRole auth method enabled")
+
+    log_info("Installing Vault policies...")
+    admin.update_policies()
+    log_ok("Policies installed")
+
+    for service_name, policy_names in SERVICES.items():
+        primary_policy = policy_names[0]
+        extra_policies = policy_names[1:]
+        policy_list = ", ".join(policy_names)
+        log_info(f"Syncing role: {service_name} → [{policy_list}]")
+        admin.provision_service_role(
+            service_name=service_name,
+            policy_name=primary_policy,
+            additional_policy_names=extra_policies,
+            token_ttl="1h",
+            token_max_ttl="24h",
+        )
+        log_ok(f"  Role '{service_name}' synced")
+
+
+def generate_all_credentials(admin: VaultAdmin) -> None:
+    """Generate fresh credentials for every service and write to disk."""
+    SERVICE_CREDS_DIR.mkdir(parents=True, exist_ok=True)
+
+    for service_name in SERVICES:
+        creds = admin.generate_service_credentials(service_name)
+        log_ok(f"  Credentials generated (role_id: {creds['role_id'][:8]}...)")
+
+        creds_file = SERVICE_CREDS_DIR / f"{service_name}.json"
+        creds_file.write_text(json.dumps(creds, indent=2) + "\n")
+        creds_file.chmod(0o600)
+        log_ok(f"  Saved to {creds_file}")
+
+
 def main() -> int:
-    log_info("=== gofr-dig AppRole Provisioning ===")
+    policies_only = "--policies-only" in sys.argv
+
+    mode = "Policy Sync" if policies_only else "Full Provisioning"
+    log_info(f"=== gofr-dig AppRole {mode} ===")
 
     # Connect to Vault
     config = resolve_vault_config()
@@ -111,52 +157,21 @@ def main() -> int:
     client = VaultClient(config)
     admin = VaultAdmin(client)
 
-    # Ensure AppRole auth method is enabled
-    log_info("Enabling AppRole auth method (idempotent)...")
-    admin.enable_approle_auth()
-    log_ok("AppRole auth method enabled")
+    # Always sync policies and roles
+    sync_policies_and_roles(admin)
 
-    # Install latest policies
-    log_info("Installing Vault policies...")
-    admin.update_policies()
-    log_ok("Policies installed")
-
-    # Provision each service
-    SERVICE_CREDS_DIR.mkdir(parents=True, exist_ok=True)
-
-    for service_name, policy_names in SERVICES.items():
-        primary_policy = policy_names[0]
-        extra_policies = policy_names[1:]
-        policy_list = ", ".join(policy_names)
-        log_info(f"Provisioning AppRole: {service_name} → [{policy_list}]")
-
-        # Create or update the role
-        admin.provision_service_role(
-            service_name=service_name,
-            policy_name=primary_policy,
-            additional_policy_names=extra_policies,
-            token_ttl="1h",
-            token_max_ttl="24h",
-        )
-        log_ok(f"  Role '{service_name}' created/updated")
-
-        # Generate credentials
-        creds = admin.generate_service_credentials(service_name)
-        log_ok(f"  Credentials generated (role_id: {creds['role_id'][:8]}...)")
-
-        # Write to file
-        creds_file = SERVICE_CREDS_DIR / f"{service_name}.json"
-        creds_file.write_text(json.dumps(creds, indent=2) + "\n")
-        creds_file.chmod(0o600)
-        log_ok(f"  Saved to {creds_file}")
+    if not policies_only:
+        log_info("Generating service credentials...")
+        generate_all_credentials(admin)
 
     log_info("")
-    log_info("=== Provisioning Complete ===")
-    log_info(f"Credentials dir: {SERVICE_CREDS_DIR}")
-    log_info("")
-    log_info("Next steps:")
-    log_info("  1. Start gofr-dig: ./scripts/start-prod.sh")
-    log_info("  2. Credentials are auto-mounted to /run/secrets/vault_creds")
+    log_info(f"=== {mode} Complete ===")
+    if not policies_only:
+        log_info(f"Credentials dir: {SERVICE_CREDS_DIR}")
+        log_info("")
+        log_info("Next steps:")
+        log_info("  1. Start gofr-dig: ./scripts/start-prod.sh")
+        log_info("  2. Credentials are auto-mounted to /run/secrets/vault_creds")
     return 0
 
 

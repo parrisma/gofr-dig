@@ -1,20 +1,23 @@
 #!/bin/bash
 # =============================================================================
-# Ensure gofr-dig Vault AppRole credentials exist
+# Ensure gofr-dig Vault AppRole credentials + policies are current
 # =============================================================================
-# Checks for service_creds/gofr-dig.json AND service_creds/gofr-admin-control.json.
-# If missing and Vault is running + unsealed + root token is available, runs
-# setup_approle.py to provision them.
+# Self-healing behavior:
+#   - If creds exist: syncs policies & roles without regenerating credentials
+#   - If creds missing: full provision (policies + roles + new credentials)
+#
+# This means policy changes in gofr-common are applied on every
+# start-prod.sh / bootstrap_gofr_dig.sh run — no manual reprovision needed.
 #
 # Designed to be called from start-prod.sh (and safe to call repeatedly).
 #
 # Exit codes:
-#   0 — credentials exist (already present or just provisioned)
+#   0 — credentials exist and policies are synced
 #   1 — cannot provision (Vault not available, not unsealed, etc.)
 #
 # Usage:
-#   ./scripts/ensure_approle.sh          # Check & provision if needed
-#   ./scripts/ensure_approle.sh --check  # Check only, don't provision
+#   ./scripts/ensure_approle.sh          # Sync policies; provision creds if needed
+#   ./scripts/ensure_approle.sh --check  # Check only, don't provision or sync
 # =============================================================================
 set -e
 
@@ -51,24 +54,23 @@ ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
 warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
 err()   { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; }
 
-# ---- Already provisioned? ---------------------------------------------------
-if [ -f "$CREDS_FILE" ] && [ -f "$ADMIN_CREDS_FILE" ]; then
-    ok "AppRole credentials exist: $CREDS_FILE"
-    ok "AppRole credentials exist: $ADMIN_CREDS_FILE"
-    exit 0
-elif [ -f "$FALLBACK_CREDS_FILE" ] && [ -f "$FALLBACK_ADMIN_CREDS_FILE" ]; then
-    ok "AppRole credentials exist: $FALLBACK_CREDS_FILE"
-    ok "AppRole credentials exist: $FALLBACK_ADMIN_CREDS_FILE"
-    exit 0
+# ---- Determine mode ---------------------------------------------------------
+# Creds exist?  →  sync policies only (self-healing, no cred regen)
+# Creds missing →  full provision (policies + roles + new credentials)
+CREDS_PRESENT=false
+if { [ -f "$CREDS_FILE" ] && [ -f "$ADMIN_CREDS_FILE" ]; } || \
+   { [ -f "$FALLBACK_CREDS_FILE" ] && [ -f "$FALLBACK_ADMIN_CREDS_FILE" ]; }; then
+    CREDS_PRESENT=true
 fi
 
-info "AppRole credentials missing or incomplete. Expected:"
-info "  - $CREDS_FILE"
-info "  - $ADMIN_CREDS_FILE"
-
 if [ "$CHECK_ONLY" = true ]; then
-    warn "Check-only mode — not provisioning"
-    exit 1
+    if [ "$CREDS_PRESENT" = true ]; then
+        ok "AppRole credentials exist"
+        exit 0
+    else
+        warn "AppRole credentials missing"
+        exit 1
+    fi
 fi
 
 # ---- Vault running? ---------------------------------------------------------
@@ -115,14 +117,26 @@ fi
 
 ok "Root token found"
 
-# ---- Provision AppRole ------------------------------------------------------
-info "Provisioning gofr-dig AppRole..."
-
+# ---- Provision / Sync -------------------------------------------------------
 export GOFR_VAULT_URL="http://${VAULT_CONTAINER}:${VAULT_PORT}"
 export GOFR_VAULT_TOKEN="$VAULT_ROOT_TOKEN"
 
 cd "$PROJECT_ROOT"
 
+if [ "$CREDS_PRESENT" = true ]; then
+    # Self-healing: sync policies & roles without regenerating credentials
+    info "Syncing Vault policies (credentials already exist)..."
+    if command -v uv &>/dev/null; then
+        uv run scripts/setup_approle.py --policies-only
+    else
+        python3 scripts/setup_approle.py --policies-only
+    fi
+    ok "Policies synced"
+    exit 0
+fi
+
+# Full provision — creds are missing
+info "Provisioning gofr-dig AppRole (full)..."
 if command -v uv &>/dev/null; then
     uv run scripts/setup_approle.py
 else
