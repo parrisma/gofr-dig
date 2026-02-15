@@ -316,9 +316,8 @@ ensure_approle_creds() {
 seed_secrets_volume() {
   local seed_script="${PROJECT_ROOT}/scripts/migrate_secrets_to_volume.sh"
   if [[ ! -f "${seed_script}" ]]; then
-    warn "Secrets seeding script not found at ${seed_script}."
-    warn "Fix: run ./scripts/migrate_secrets_to_volume.sh manually if you add it later."
-    return 1
+    die "Secrets seeding script not found at ${seed_script}." \
+      "This step is currently REQUIRED. Add scripts/migrate_secrets_to_volume.sh (or restore it) and rerun."
   fi
 
   info "Seeding secrets into Docker volumes (gofr-secrets, gofr-secrets-test)."
@@ -511,8 +510,8 @@ main() {
 
   run_step "Build dev image" build_dev_image || true
   run_step "Build prod image" build_prod_image || true
-  run_step "Ensure AppRole creds" ensure_approle_creds || true
-  run_step "Seed secrets volume" seed_secrets_volume || true
+  run_step "Ensure AppRole creds" ensure_approle_creds
+  run_step "Seed secrets volume" seed_secrets_volume
 
   if [[ "$START_DEV" == "true" ]]; then
     run_step "Start dev container" start_dev_container

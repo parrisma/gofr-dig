@@ -126,22 +126,29 @@ cd "$PROJECT_ROOT"
 if [ "$CREDS_PRESENT" = true ]; then
     # Self-healing: sync policies & roles without regenerating credentials
     info "Syncing Vault policies (credentials already exist)..."
-    if command -v uv &>/dev/null; then
-        uv run scripts/setup_approle.py --policies-only
-    else
-        python3 scripts/setup_approle.py --policies-only
+    if ! command -v uv &>/dev/null; then
+        err "uv is required but not available on PATH"
+        err "Fix: install uv (project standard) and retry"
+        exit 1
     fi
+    uv run lib/gofr-common/scripts/setup_approle.py \
+        --project-root "$PROJECT_ROOT" \
+        --config config/gofr_approles.json \
+        --policies-only
     ok "Policies synced"
     exit 0
 fi
 
 # Full provision — creds are missing
 info "Provisioning gofr-dig AppRole (full)..."
-if command -v uv &>/dev/null; then
-    uv run scripts/setup_approle.py
-else
-    python3 scripts/setup_approle.py
+if ! command -v uv &>/dev/null; then
+    err "uv is required but not available on PATH"
+    err "Fix: install uv (project standard) and retry"
+    exit 1
 fi
+uv run lib/gofr-common/scripts/setup_approle.py \
+    --project-root "$PROJECT_ROOT" \
+    --config config/gofr_approles.json
 
 # ---- Verify -----------------------------------------------------------------
 if [ -f "$CREDS_FILE" ] && [ -f "$ADMIN_CREDS_FILE" ]; then
