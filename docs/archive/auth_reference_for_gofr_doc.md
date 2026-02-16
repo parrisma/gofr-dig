@@ -25,7 +25,7 @@ Both MCP and web entry points follow the same three-step pattern:
 ```python
 # Step 1 — resolve JWT secret (CLI arg → env var → auto-gen dev secret)
 jwt_secret, require_auth = resolve_auth_config(
-    env_prefix="GOFR_DIG",       # → reads GOFR_DIG_JWT_SECRET, GOFR_DIG_ENV
+    env_prefix="GOFR_DIG",       # → reads GOFR_JWT_SECRET (shared), GOFR_DIG_ENV
     jwt_secret_arg=args.jwt_secret,
     require_auth=not args.no_auth,
     logger=startup_logger,

@@ -54,6 +54,10 @@ RUN chown -R gofr-dig:gofr-dig /home/gofr-dig
 # We only create the directory here so the mount point exists.
 RUN mkdir -p /run/secrets && chown gofr-dig:gofr-dig /run/secrets
 
+# Copy production entrypoint (handles Vault JWT read, creds copy, user drop)
+COPY --chown=root:root docker/entrypoint-prod.sh /home/gofr-dig/entrypoint-prod.sh
+RUN chmod +x /home/gofr-dig/entrypoint-prod.sh
+
 # Build number baked at image build time (format: <commit-count>.<short-hash>)
 ARG GOFR_DIG_BUILD_NUMBER=0.unknown
 ENV GOFR_DIG_BUILD_NUMBER=${GOFR_DIG_BUILD_NUMBER}

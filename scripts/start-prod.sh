@@ -20,8 +20,9 @@
 #   ./start-prod.sh --down              # Stop and remove all services
 #
 # Required environment (unless --no-auth):
-#   GOFR_DIG_JWT_SECRET   JWT signing secret — auto-loaded from Vault if available.
-#                         Falls back to env var. Generate: openssl rand -hex 32
+#   Vault must be running with the JWT secret at secret/gofr/config/jwt-signing-secret.
+#   Containers read the secret from Vault via AppRole at startup.
+#   GOFR_JWT_SECRET env var is only needed as an override (not recommended for prod).
 #
 # Optional environment:
 #   GOFR_DIG_AUTH_BACKEND Auth backend: vault (default)
@@ -268,44 +269,36 @@ if [ "$NO_AUTH" = true ]; then
     export GOFR_DIG_NO_AUTH=1
     export GOFR_DIG_AUTH_BACKEND=vault
 else
-    # Try to load JWT secret from Vault if not already set
-    if [ -z "${GOFR_DIG_JWT_SECRET:-}" ]; then
-        VAULT_ROOT_TOKEN_FILE="$PROJECT_ROOT/secrets/vault_root_token"
-        if [ -f "$VAULT_ROOT_TOKEN_FILE" ] && docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
-            info "Loading JWT secret from Vault..."
-            VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE")
-            VAULT_ADDR_LOCAL="$(vault_local_addr)"
-            JWT_SECRET=$(docker exec \
-                -e VAULT_ADDR="$VAULT_ADDR_LOCAL" \
-                -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" \
-                gofr-vault vault kv get -field=value secret/gofr/config/jwt-signing-secret 2>/dev/null) || true
+    # Verify Vault is reachable and has the JWT secret — containers will read it
+    # at startup via AppRole, but we do a pre-flight check here.
+    VAULT_ROOT_TOKEN_FILE="$PROJECT_ROOT/secrets/vault_root_token"
+    if [ -f "$VAULT_ROOT_TOKEN_FILE" ] && docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
+        VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE")
+        VAULT_ADDR_LOCAL="$(vault_local_addr)"
+        JWT_CHECK=$(docker exec \
+            -e VAULT_ADDR="$VAULT_ADDR_LOCAL" \
+            -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" \
+            gofr-vault vault kv get -field=value secret/gofr/config/jwt-signing-secret 2>/dev/null) || true
 
-            if [ -n "$JWT_SECRET" ]; then
-                export GOFR_DIG_JWT_SECRET="$JWT_SECRET"
-                ok "JWT secret loaded from Vault"
-            else
-                warn "Could not read JWT secret from Vault (path: secret/gofr/config/jwt-signing-secret)"
-                echo ""
-                echo "  Options:"
-                echo "    1. Bootstrap Vault:  ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
-                echo "    2. Set manually:     export GOFR_DIG_JWT_SECRET=\$(openssl rand -hex 32)"
-                echo "    3. Run without auth: $0 --no-auth"
-                echo ""
-                fail "Cannot start without JWT secret"
-            fi
+        if [ -n "$JWT_CHECK" ]; then
+            ok "JWT secret verified in Vault (containers will read via AppRole)"
         else
-            echo ""
-            echo "  GOFR_DIG_JWT_SECRET is not set and Vault is not available."
+            warn "Could not read JWT secret from Vault (path: secret/gofr/config/jwt-signing-secret)"
             echo ""
             echo "  Options:"
-            echo "    1. Start Vault:      ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
-            echo "    2. Set manually:     export GOFR_DIG_JWT_SECRET=\$(openssl rand -hex 32)"
-            echo "    3. Run without auth: $0 --no-auth"
+            echo "    1. Bootstrap Vault:  ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
+            echo "    2. Run without auth: $0 --no-auth"
             echo ""
-            fail "Cannot start without JWT secret"
+            fail "Cannot start without JWT secret in Vault"
         fi
     else
-        ok "JWT secret set from environment"
+        warn "Vault is not running — containers will fail to read JWT secret at startup"
+        echo ""
+        echo "  Options:"
+        echo "    1. Start Vault:      ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
+        echo "    2. Run without auth: $0 --no-auth"
+        echo ""
+        fail "Cannot start without Vault"
     fi
 
     # Set Vault backend env vars for containers

@@ -1,110 +1,81 @@
 #!/bin/bash
 # =============================================================================
 # gofr-dig Production Entrypoint
-# Starts MCP, MCPO, and Web servers via supervisor
-# =============================================================================
+# Common startup for all gofr-dig containers: copies AppRole creds, reads
+# JWT signing secret from Vault, sets up directories, then exec's CMD.
 #
-# Environment variables (all prefixed with GOFR_DIG_ to match Python code):
-#   GOFR_DIG_JWT_SECRET   - JWT signing secret
-#   GOFR_DIG_MCP_PORT     - MCP server port (from gofr_ports.env)
-#   GOFR_DIG_MCPO_PORT    - MCPO proxy port (from gofr_ports.env)
-#   GOFR_DIG_WEB_PORT     - Web server port (from gofr_ports.env)
-#   GOFR_DIG_DATA_DIR     - Data root directory
-#   GOFR_DIG_STORAGE_DIR  - Storage directory
+# Usage in compose.prod.yml:
+#   entrypoint: ["/home/gofr-dig/entrypoint-prod.sh"]
+#   command: ["/home/gofr-dig/.venv/bin/python", "-m", "app.main_mcp", ...]
+#
+# Environment variables:
+#   GOFR_JWT_SECRET       - Override: skip Vault read, use this value directly
+#   GOFR_DIG_VAULT_URL    - Vault address (default: http://gofr-vault:<GOFR_VAULT_PORT>)
+#   GOFR_DIG_DATA_DIR     - Data root (default: /home/gofr-dig/data)
+#   GOFR_DIG_STORAGE_DIR  - Storage dir (default: /home/gofr-dig/data/storage)
 #   GOFR_DIG_NO_AUTH      - Set to "1" to disable authentication
 # =============================================================================
 set -e
 
-# --- Environment with defaults (all GOFR_DIG_ prefixed) ---------------------
-# These names MUST match what the Python code reads via
-# resolve_auth_config(env_prefix="GOFR_DIG") and os.environ.get("GOFR_DIG_*")
-export GOFR_DIG_JWT_SECRET="${GOFR_DIG_JWT_SECRET:-}"
-export GOFR_DIG_MCP_PORT="${GOFR_DIG_MCP_PORT:?GOFR_DIG_MCP_PORT not set — source gofr_ports.env}"
-export GOFR_DIG_MCPO_PORT="${GOFR_DIG_MCPO_PORT:?GOFR_DIG_MCPO_PORT not set — source gofr_ports.env}"
-export GOFR_DIG_WEB_PORT="${GOFR_DIG_WEB_PORT:?GOFR_DIG_WEB_PORT not set — source gofr_ports.env}"
-export GOFR_DIG_DATA_DIR="${GOFR_DIG_DATA_DIR:-/home/gofr-dig/data}"
-export GOFR_DIG_STORAGE_DIR="${GOFR_DIG_STORAGE_DIR:-/home/gofr-dig/data/storage}"
-export GOFR_DIG_NO_AUTH="${GOFR_DIG_NO_AUTH:-}"
-
-# Neo4j connection (optional)
-export NEO4J_URI="${NEO4J_URI:-bolt://gofr-neo4j:7687}"
-export NEO4J_USER="${NEO4J_USER:-neo4j}"
-export NEO4J_PASSWORD="${NEO4J_PASSWORD:-}"
-
-# Path to venv
 VENV_PATH="/home/gofr-dig/.venv"
+CREDS_SOURCE="/run/gofr-secrets/service_creds/gofr-dig.json"
+CREDS_TARGET="/run/secrets/vault_creds"
 
-# --- Auth flag ---------------------------------------------------------------
-# If GOFR_DIG_NO_AUTH=1, pass --no-auth to the Python servers
-AUTH_FLAG=""
-if [ "${GOFR_DIG_NO_AUTH}" = "1" ]; then
-    AUTH_FLAG="--no-auth"
-    echo "WARNING: Authentication is DISABLED (GOFR_DIG_NO_AUTH=1)"
+# --- Directories -------------------------------------------------------------
+DATA_DIR="${GOFR_DIG_DATA_DIR:-/home/gofr-dig/data}"
+STORAGE_DIR="${GOFR_DIG_STORAGE_DIR:-/home/gofr-dig/data/storage}"
+mkdir -p "${DATA_DIR}" "${STORAGE_DIR}" /home/gofr-dig/logs
+chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs 2>/dev/null || true
+
+# --- Copy AppRole credentials ------------------------------------------------
+mkdir -p /run/secrets
+if [ -f "${CREDS_SOURCE}" ]; then
+    cp "${CREDS_SOURCE}" "${CREDS_TARGET}"
+    chown gofr-dig:gofr-dig "${CREDS_TARGET}"
+else
+    echo "WARNING: No AppRole credentials at ${CREDS_SOURCE}"
 fi
 
-echo "=== gofr-dig Production Container ==="
-echo "MCP Port:  ${GOFR_DIG_MCP_PORT}"
-echo "MCPO Port: ${GOFR_DIG_MCPO_PORT}"
-echo "Web Port:  ${GOFR_DIG_WEB_PORT}"
-echo "Data Dir:  ${GOFR_DIG_DATA_DIR}"
-echo "Auth:      $([ -n "${AUTH_FLAG}" ] && echo 'DISABLED' || echo 'JWT enabled')"
+# --- Read JWT secret from Vault via AppRole ----------------------------------
+# Source of truth: Vault at secret/gofr/config/jwt-signing-secret
+# Env var GOFR_JWT_SECRET is a fallback override only.
+if [ -z "${GOFR_JWT_SECRET:-}" ]; then
+    if [ -f "${CREDS_TARGET}" ]; then
+        echo "Reading JWT secret from Vault via AppRole..."
+        VAULT_URL="${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT:-8200}}"
+        JWT_FROM_VAULT=$(
+            su -s /bin/bash gofr-dig -c "${VENV_PATH}/bin/python -c \"
+import json, hvac
+creds = json.load(open('${CREDS_TARGET}'))
+c = hvac.Client(url='${VAULT_URL}')
+c.auth.approle.login(role_id=creds['role_id'], secret_id=creds['secret_id'])
+d = c.secrets.kv.v2.read_secret_version(path='gofr/config/jwt-signing-secret', mount_point='secret')
+print(d['data']['data']['value'])
+\"" 2>&1
+        ) || true
 
-# --- Ensure data directories exist -------------------------------------------
-mkdir -p "${GOFR_DIG_DATA_DIR}" "${GOFR_DIG_STORAGE_DIR}"
-chown -R gofr-dig:gofr-dig /home/gofr-dig/data
+        if [ -n "${JWT_FROM_VAULT}" ]; then
+            export GOFR_JWT_SECRET="${JWT_FROM_VAULT}"
+            echo "JWT secret loaded from Vault via AppRole"
+        else
+            echo "FATAL: Cannot read JWT secret from Vault and GOFR_JWT_SECRET not set"
+            exit 1
+        fi
+    else
+        echo "FATAL: No Vault credentials at ${CREDS_TARGET} and GOFR_JWT_SECRET not set"
+        exit 1
+    fi
+else
+    echo "JWT secret set via environment override"
+fi
 
-# --- Shared supervisor environment ------------------------------------------
-# All GOFR_DIG_* env vars are passed through to each program.
-# supervisor uses %(ENV_VARNAME)s to reference the container environment.
-SHARED_ENV="PATH=\"${VENV_PATH}/bin:%(ENV_PATH)s\",VIRTUAL_ENV=\"${VENV_PATH}\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_JWT_SECRET=\"%(ENV_GOFR_DIG_JWT_SECRET)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_MCP_PORT=\"%(ENV_GOFR_DIG_MCP_PORT)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_MCPO_PORT=\"%(ENV_GOFR_DIG_MCPO_PORT)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_WEB_PORT=\"%(ENV_GOFR_DIG_WEB_PORT)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_DATA_DIR=\"%(ENV_GOFR_DIG_DATA_DIR)s\""
-SHARED_ENV="${SHARED_ENV},GOFR_DIG_STORAGE_DIR=\"%(ENV_GOFR_DIG_STORAGE_DIR)s\""
-SHARED_ENV="${SHARED_ENV},NEO4J_URI=\"%(ENV_NEO4J_URI)s\""
-SHARED_ENV="${SHARED_ENV},NEO4J_USER=\"%(ENV_NEO4J_USER)s\""
-SHARED_ENV="${SHARED_ENV},NEO4J_PASSWORD=\"%(ENV_NEO4J_PASSWORD)s\""
+# --- Auth flag ---------------------------------------------------------------
+EXTRA_ARGS=""
+if [ "${GOFR_DIG_NO_AUTH:-}" = "1" ]; then
+    echo "WARNING: Authentication is DISABLED (GOFR_DIG_NO_AUTH=1)"
+    EXTRA_ARGS="--no-auth"
+fi
 
-# --- Generate supervisor configuration --------------------------------------
-cat > /etc/supervisor/conf.d/gofr-dig.conf << EOF
-[supervisord]
-nodaemon=true
-logfile=/var/log/supervisor/supervisord.log
-pidfile=/var/run/supervisord.pid
-user=root
-
-[program:mcp]
-command=${VENV_PATH}/bin/python -m app.main_mcp ${AUTH_FLAG}
-directory=/home/gofr-dig
-user=gofr-dig
-autostart=true
-autorestart=true
-stdout_logfile=/home/gofr-dig/logs/mcp.log
-stderr_logfile=/home/gofr-dig/logs/mcp-error.log
-environment=${SHARED_ENV}
-
-[program:mcpo]
-command=${VENV_PATH}/bin/mcpo --host 0.0.0.0 --port ${GOFR_DIG_MCPO_PORT} -- ${VENV_PATH}/bin/python -m app.main_mcp ${AUTH_FLAG}
-directory=/home/gofr-dig
-user=gofr-dig
-autostart=true
-autorestart=true
-stdout_logfile=/home/gofr-dig/logs/mcpo.log
-stderr_logfile=/home/gofr-dig/logs/mcpo-error.log
-environment=${SHARED_ENV}
-
-[program:web]
-command=${VENV_PATH}/bin/python -m app.main_web ${AUTH_FLAG}
-directory=/home/gofr-dig
-user=gofr-dig
-autostart=true
-autorestart=true
-stdout_logfile=/home/gofr-dig/logs/web.log
-stderr_logfile=/home/gofr-dig/logs/web-error.log
-environment=${SHARED_ENV}
-EOF
-
-echo "Starting supervisor..."
-exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+# --- Exec the service command ------------------------------------------------
+# Drop to gofr-dig user and exec the CMD passed by compose
+exec su -s /bin/bash gofr-dig -c "exec $* ${EXTRA_ARGS}"

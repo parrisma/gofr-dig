@@ -15,7 +15,6 @@
 #   ./scripts/run_tests.sh -v                       # Run with verbose output
 #   ./scripts/run_tests.sh --coverage               # Run with coverage report
 #   ./scripts/run_tests.sh --coverage-html          # Run with HTML coverage report
-#   ./scripts/run_tests.sh --unit                   # Run unit tests only (no servers)
 #   ./scripts/run_tests.sh --integration            # Run integration tests only (with servers)
 #   ./scripts/run_tests.sh --no-servers             # Run without starting servers
 #   ./scripts/run_tests.sh --stop                   # Stop servers only
@@ -78,7 +77,7 @@ else
 fi
 
 # Test configuration
-export GOFR_DIG_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
+export GOFR_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_AUTH_BACKEND="vault"
 # Test ports come from gofr_ports.env (sourced above) — no hardcoded fallbacks
 export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:?GOFR_DIG_MCP_PORT_TEST not set — source gofr_ports.env}"
@@ -287,7 +286,6 @@ stop_vault_test_container() {
 START_SERVERS=true
 COVERAGE=false
 COVERAGE_HTML=false
-RUN_UNIT=false
 RUN_INTEGRATION=false
 RUN_ALL=false
 STOP_ONLY=false
@@ -304,11 +302,6 @@ while [[ $# -gt 0 ]]; do
         --coverage-html)
             COVERAGE=true
             COVERAGE_HTML=true
-            shift
-            ;;
-        --unit)
-            RUN_UNIT=true
-            START_SERVERS=false
             shift
             ;;
         --integration)
@@ -351,7 +344,6 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --coverage       Run with coverage report"
             echo "  --coverage-html  Run with HTML coverage report"
-            echo "  --unit           Run unit tests only (no servers)"
             echo "  --integration    Run integration tests only (with servers)"
             echo "  --all            Run all test categories"
             echo "  --docker         Use Docker hostnames for integration tests (default)"
@@ -457,12 +449,7 @@ echo -e "${GREEN}=== Running Tests ===${NC}"
 set +e
 TEST_EXIT_CODE=0
 
-if [ "$RUN_UNIT" = true ]; then
-    echo -e "${BLUE}Running unit tests only (no servers)...${NC}"
-    uv run python -m pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS} -k "not integration"
-    TEST_EXIT_CODE=$?
-
-elif [ "$RUN_INTEGRATION" = true ]; then
+if [ "$RUN_INTEGRATION" = true ]; then
     echo -e "${BLUE}Running integration tests (with servers)...${NC}"
     uv run python -m pytest ${TEST_DIR}/integration/ -v ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?

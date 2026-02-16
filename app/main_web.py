@@ -59,7 +59,7 @@ if __name__ == "__main__":
         "--jwt-secret",
         type=str,
         default=None,
-        help="JWT secret key (default: from GOFR_DIG_JWT_SECRET env var or auto-generated)",
+        help="JWT secret key (default: read from Vault, or GOFR_JWT_SECRET env var)",
     )
     parser.add_argument(
         "--no-auth",

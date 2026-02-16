@@ -61,7 +61,7 @@ services:
       - GOFR_DIG_RATE_LIMIT_WINDOW=${GOFR_DIG_RATE_LIMIT_WINDOW:-60}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
-      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_JWT_SECRET=${GOFR_JWT_SECRET:-}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
@@ -134,7 +134,7 @@ services:
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth backend — vault only
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
-      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      - GOFR_JWT_SECRET=${GOFR_JWT_SECRET:-}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}

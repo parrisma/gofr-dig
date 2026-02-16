@@ -14,7 +14,6 @@
 #   Or manually:
 #     cd docker
 #     set -a && source ../lib/gofr-common/config/gofr_ports.env && set +a
-#     export GOFR_DIG_JWT_SECRET=$(openssl rand -hex 32)
 #     docker compose -f compose.prod.yml up -d
 #
 # Services:
@@ -46,18 +45,15 @@ services:
     hostname: gofr-dig-mcp
     user: root
     working_dir: /home/gofr-dig
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: ["/home/gofr-dig/entrypoint-prod.sh"]
     command:
-      - |
-        mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
-        chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
-        # Copy service creds from shared volume to VaultIdentity's expected path
-        mkdir -p /run/secrets
-        cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
-        chown gofr-dig:gofr-dig /run/secrets/vault_creds
-        AUTH_FLAG=""
-        [ "$${GOFR_DIG_NO_AUTH}" = "1" ] && AUTH_FLAG="--no-auth"
-        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port $${GOFR_DIG_MCP_PORT} $${AUTH_FLAG}"
+      - /home/gofr-dig/.venv/bin/python
+      - -m
+      - app.main_mcp
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "${GOFR_DIG_MCP_PORT}"
     environment:
       - GOFR_DIG_ENV=PROD
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
@@ -68,8 +64,7 @@ services:
       - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
-      # Auth — passed through from host environment or start-prod.sh
-      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      # Auth — JWT secret read from Vault by entrypoint-prod.sh
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
@@ -138,18 +133,15 @@ services:
     hostname: gofr-dig-web
     user: root
     working_dir: /home/gofr-dig
-    entrypoint: ["/bin/sh", "-c"]
+    entrypoint: ["/home/gofr-dig/entrypoint-prod.sh"]
     command:
-      - |
-        mkdir -p /home/gofr-dig/logs
-        chown -R gofr-dig:gofr-dig /home/gofr-dig/logs
-        # Copy service creds from shared volume to VaultIdentity's expected path
-        mkdir -p /run/secrets
-        cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
-        chown gofr-dig:gofr-dig /run/secrets/vault_creds
-        AUTH_FLAG=""
-        [ "$${GOFR_DIG_NO_AUTH}" = "1" ] && AUTH_FLAG="--no-auth"
-        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_web --host 0.0.0.0 --port $${GOFR_DIG_WEB_PORT} $${AUTH_FLAG}"
+      - /home/gofr-dig/.venv/bin/python
+      - -m
+      - app.main_web
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "${GOFR_DIG_WEB_PORT}"
     environment:
       - GOFR_DIG_ENV=PROD
       - GOFR_DIG_WEB_PORT=${GOFR_DIG_WEB_PORT}
@@ -160,8 +152,7 @@ services:
       - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
-      # Auth — same as MCP
-      - GOFR_DIG_JWT_SECRET=${GOFR_DIG_JWT_SECRET:-}
+      # Auth — JWT secret read from Vault by entrypoint-prod.sh
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
