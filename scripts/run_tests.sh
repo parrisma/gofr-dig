@@ -238,7 +238,7 @@ start_vault_test_container() {
     if [ $retries -eq $max_retries ]; then
         echo ""
         echo -e "${RED}Vault failed to start within ${max_retries}s${NC}"
-        docker logs "${VAULT_CONTAINER_NAME}" 2>&1 | tail -20
+        docker logs "${VAULT_CONTAINER_NAME}" 2>&1
         return 1
     fi
 
@@ -247,10 +247,22 @@ start_vault_test_container() {
         "${VAULT_CONTAINER_NAME}" \
         vault secrets enable -path=secret -version=2 kv 2>/dev/null || true
 
+    # Vault access for the pytest process.
+    # In Docker mode, pytest runs in the dev container and should talk to Vault
+    # via the container hostname on the shared test network.
     if is_running_in_docker; then
         export GOFR_DIG_VAULT_URL="http://${VAULT_CONTAINER_NAME}:${VAULT_INTERNAL_PORT}"
+
+        # Fail fast if Docker DNS is not available (prevents flaky mid-suite failures).
+        if ! getent hosts "${VAULT_CONTAINER_NAME}" > /dev/null 2>&1; then
+            echo -e "${RED}FATAL: Cannot resolve ${VAULT_CONTAINER_NAME} from the test runner.${NC}"
+            echo "Expected: dev container attached to '${TEST_NETWORK}' so Docker DNS can resolve service names."
+            echo "Try: docker network connect ${TEST_NETWORK} gofr-dig-dev"
+            return 1
+        fi
     else
-        export GOFR_DIG_VAULT_URL="http://localhost:${VAULT_TEST_PORT}"
+        # Localhost mode: use the published test port.
+        export GOFR_DIG_VAULT_URL="http://127.0.0.1:${VAULT_TEST_PORT}"
     fi
     export GOFR_DIG_VAULT_TOKEN="${VAULT_TEST_TOKEN}"
 
