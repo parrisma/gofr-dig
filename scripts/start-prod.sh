@@ -21,8 +21,8 @@
 #
 # Required environment (unless --no-auth):
 #   Vault must be running with the JWT secret at secret/gofr/config/jwt-signing-secret.
-#   Containers read the secret from Vault via AppRole at startup.
-#   GOFR_JWT_SECRET env var is only needed as an override (not recommended for prod).
+#   Containers read the secret from Vault at runtime via JwtSecretProvider.
+#   No GOFR_JWT_SECRET env var is used.
 #
 # Optional environment:
 #   GOFR_DIG_AUTH_BACKEND Auth backend: vault (default)

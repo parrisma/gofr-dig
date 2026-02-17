@@ -78,6 +78,8 @@ fi
 
 # Test configuration
 export GOFR_DIG_AUTH_BACKEND="vault"
+# Integration tests are not auth tests — disable auth on compose services
+export GOFR_DIG_NO_AUTH=1
 # Test ports come from gofr_ports.env (sourced above) — no hardcoded fallbacks
 export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:?GOFR_DIG_MCP_PORT_TEST not set — source gofr_ports.env}"
 export GOFR_DIG_MCPO_PORT_TEST="${GOFR_DIG_MCPO_PORT_TEST:?GOFR_DIG_MCPO_PORT_TEST not set — source gofr_ports.env}"

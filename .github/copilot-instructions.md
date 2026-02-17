@@ -13,7 +13,8 @@ These rules are MANDATORY. Violating any rule in the HARD RULES section is a cri
 5. **No `localhost`.** This project runs inside a Docker dev container. Always use Docker service names or known host:port pairs. The host Docker daemon is reachable at `host.docker.internal`.
 6. **UV only.** Use `uv run`, `uv add`, `uv sync`. NEVER use `pip install`, `python -m venv`, `pip freeze`, or any pip-based workflow.
 7. **No `print()`.** Use the project's `StructuredLogger` for all logging. Every log line must be clear, actionable, and include structured context — never cryptic or generic.
-
+8. **ASCII only in code and output.** Never use emoji, Unicode symbols, or box-drawing characters (e.g. arrows, check marks, bullet points, decorative borders). Use plain ASCII equivalents: `-` for bullets, `->` for arrows, `[Y]`/`[N]` for pass/fail, `<=`/`!=` for comparisons, `---`/`===` for separators.
+9. **NEVER rewrite pushed commits.** Do NOT use `git commit --amend`, `git rebase -i`, or any other history-rewriting command on commits that have already been pushed to origin. This causes the local and remote branches to diverge, requiring force-pushes and risking lost work. If a pushed commit needs fixing, make a follow-up commit. Keeping local and remote in sync is non-negotiable.
 ---
 
 ## CHANGE PROCESS (mandatory for anything beyond a trivial few-line fix)
@@ -135,7 +136,7 @@ These are shared across all GOFR projects. Paths are relative to project root.
 
 | Script | Purpose |
 |--------|---------|
-| `lib/gofr-common/scripts/auth_env.sh` | Mint a short-lived Vault operator token and export `VAULT_ADDR`, `VAULT_TOKEN`, `GOFR_JWT_SECRET`. Use via `source <(./lib/gofr-common/scripts/auth_env.sh --docker)`. |
+| `lib/gofr-common/scripts/auth_env.sh` | Mint a short-lived Vault operator token and export `VAULT_ADDR`, `VAULT_TOKEN`. Use via `source <(./lib/gofr-common/scripts/auth_env.sh --docker)`. |
 | `lib/gofr-common/scripts/auth_manager.sh` | Manage auth groups and tokens (list, create, inspect, revoke). Wraps `auth_manager.py`. |
 | `lib/gofr-common/scripts/bootstrap_auth.sh` | One-time auth bootstrap — creates reserved groups (`admin`, `public`) and initial tokens in Vault. |
 | `lib/gofr-common/scripts/bootstrap_platform.sh` | Idempotent platform bootstrap — guided setup of Vault, auth, and services. |

@@ -217,10 +217,9 @@ def configure_test_auth_environment():
     """
     Configure environment variables for test server authentication.
 
-    This ensures test MCP/web servers use the same JWT secret and Vault backend
+    This ensures test MCP/web servers use the same Vault backend
     as the test fixtures. Auto-runs before all tests.
     """
-    os.environ["GOFR_JWT_SECRET"] = TEST_JWT_SECRET
     os.environ["GOFR_DIG_AUTH_BACKEND"] = "vault"
     os.environ["GOFR_DIG_ALLOW_PRIVATE_URLS"] = "true"
     os.environ.setdefault("GOFR_DIG_RATE_LIMIT_CALLS", "100000")
@@ -236,7 +235,6 @@ def configure_test_auth_environment():
     yield
 
     # Cleanup
-    os.environ.pop("GOFR_JWT_SECRET", None)
     os.environ.pop("GOFR_DIG_AUTH_BACKEND", None)
     os.environ.pop("GOFR_DIG_VAULT_URL", None)
     os.environ.pop("GOFR_DIG_VAULT_TOKEN", None)

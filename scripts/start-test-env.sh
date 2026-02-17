@@ -13,15 +13,17 @@
 #   6. Runs health checks to verify services are up
 #
 # Usage:
-#   ./start-test-env.sh                     # Start (auto-builds if image missing)
+#   ./start-test-env.sh                     # Start (auth enabled, auto-builds if image missing)
 #   ./start-test-env.sh --build             # Force rebuild before starting
+#   ./start-test-env.sh --no-auth           # Start with authentication disabled
 #   ./start-test-env.sh --port-offset 100   # Shift host ports by N
 #   ./start-test-env.sh --down              # Stop and remove all dev services
 #
 # Notes:
-#   - This script only manages the dev compose stack (mcp/mcpo/web)
+#   - This script manages the dev compose stack (vault, mcp, mcpo, web)
 #   - It does NOT stop the gofr-dig-dev devcontainer
-#   - Dev stack runs with --no-auth (see compose.dev.yml)
+#   - Auth is ENABLED by default (Vault runs in compose)
+#   - Use --no-auth to disable authentication
 #
 # Ports are read from lib/gofr-common/config/gofr_ports.env (single source of truth)
 # =============================================================================
@@ -40,17 +42,13 @@ PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
 FORCE_BUILD=false
 DO_DOWN=false
 PORT_OFFSET=0
-WITH_AUTH=false
-
-VAULT_CONTAINER_NAME="gofr-vault-test"
-VAULT_IMAGE="hashicorp/vault:1.15.4"
-VAULT_TOKEN_DEFAULT="gofr-dev-root-token"
+NO_AUTH=false
 
 # ---- Parse arguments --------------------------------------------------------
 while [ $# -gt 0 ]; do
     case "$1" in
         --build)     FORCE_BUILD=true; shift ;;
-        --auth)      WITH_AUTH=true; shift ;;
+        --no-auth)   NO_AUTH=true; shift ;;
         --port-offset)
             PORT_OFFSET="$2"
             if ! [[ "$PORT_OFFSET" =~ ^[0-9]+$ ]]; then
@@ -66,7 +64,7 @@ while [ $# -gt 0 ]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--build] [--auth] [--port-offset N] [--down] [--help]"
+            echo "Usage: $0 [--build] [--no-auth] [--port-offset N] [--down] [--help]"
             exit 1
             ;;
     esac
@@ -182,34 +180,12 @@ export GOFR_DIG_ALLOW_PRIVATE_URLS=true
 export GOFR_DIG_RATE_LIMIT_CALLS=100000
 export GOFR_DIG_RATE_LIMIT_WINDOW=60
 
-if [ "$WITH_AUTH" = true ]; then
-    if [ -z "${GOFR_JWT_SECRET:-}" ]; then
-        fail "--auth requires GOFR_JWT_SECRET to be set"
-    fi
-
-    # Start a dev Vault container on the same network if not already running.
-    if ! docker inspect "${VAULT_CONTAINER_NAME}" &>/dev/null 2>&1; then
-        info "Starting Vault dev container (${VAULT_CONTAINER_NAME})..."
-        docker run -d --name "${VAULT_CONTAINER_NAME}" \
-            --network "${NETWORK_NAME}" \
-            --cap-add=IPC_LOCK \
-            -e "VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TOKEN_DEFAULT}" \
-            -e "VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200" \
-            "${VAULT_IMAGE}" >/dev/null
-        ok "Vault dev container started"
-    else
-        ok "Vault dev container already exists"
-    fi
-
-    # Provide Vault connection details to the gofr-dig stack.
-    export GOFR_DIG_VAULT_URL="${GOFR_DIG_VAULT_URL:-http://${VAULT_CONTAINER_NAME}:8200}"
-    export GOFR_DIG_VAULT_TOKEN="${GOFR_DIG_VAULT_TOKEN:-${VAULT_TOKEN_DEFAULT}}"
-
-    export GOFR_DIG_NO_AUTH=0
-    ok "Auth ENABLED for dev stack (GOFR_DIG_NO_AUTH=0)"
-else
+if [ "$NO_AUTH" = true ]; then
     export GOFR_DIG_NO_AUTH=1
-    ok "Auth DISABLED for dev stack (default)"
+    warn "Auth DISABLED for dev stack (--no-auth)"
+else
+    export GOFR_DIG_NO_AUTH=0
+    ok "Auth ENABLED (Vault managed by compose)"
 fi
 
 docker compose -f "$COMPOSE_FILE" up -d
@@ -265,10 +241,10 @@ echo "  MCPO Server: http://host.docker.internal:${GOFR_DIG_MCPO_HOST_PORT}"
 echo "  Web Server:  http://host.docker.internal:${GOFR_DIG_WEB_HOST_PORT}"
 echo ""
 echo "  Network:     ${NETWORK_NAME}"
-if [ "$WITH_AUTH" = true ]; then
-    echo "  Auth:        ENABLED"
+if [ "$NO_AUTH" = true ]; then
+    echo "  Auth:        DISABLED (--no-auth)"
 else
-    echo "  Auth:        DISABLED (dev stack uses --no-auth)"
+    echo "  Auth:        ENABLED (Vault in compose)"
 fi
 echo ""
 echo "  Logs:    docker compose -f $COMPOSE_FILE logs -f"

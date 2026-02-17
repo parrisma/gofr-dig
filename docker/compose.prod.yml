@@ -64,7 +64,7 @@ services:
       - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
-      # Auth — JWT secret read from Vault by entrypoint-prod.sh
+      # Auth — JWT secret read from Vault at runtime by JwtSecretProvider
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
@@ -152,7 +152,7 @@ services:
       - GOFR_DIG_SEQ_API_KEY=${GOFR_DIG_SEQ_API_KEY:-}
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
-      # Auth — JWT secret read from Vault by entrypoint-prod.sh
+      # Auth — JWT secret read from Vault at runtime by JwtSecretProvider
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
