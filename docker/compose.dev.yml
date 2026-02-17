@@ -32,6 +32,56 @@ x-gofr-dig-common: &gofr_dig_common
 
 services:
   # ==========================================================================
+  # 0a. Vault (Ephemeral Dev Mode)
+  # ==========================================================================
+  vault:
+    image: hashicorp/vault:1.15.4
+    container_name: gofr-vault-test
+    hostname: gofr-vault-test
+    restart: "no"
+    cap_add:
+      - IPC_LOCK
+    environment:
+      - VAULT_DEV_ROOT_TOKEN_ID=gofr-dev-root-token
+      - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
+      - VAULT_LOG_LEVEL=warn
+      - VAULT_ADDR=http://127.0.0.1:8200
+    command: server -dev
+    ports:
+      - "${GOFR_VAULT_PORT_TEST:-8301}:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    networks:
+      - gofr-test-net
+
+  # ==========================================================================
+  # 0b. Vault Init (Seed Secrets -- runs once then exits)
+  # ==========================================================================
+  vault-init:
+    image: hashicorp/vault:1.15.4
+    container_name: gofr-vault-init-test
+    restart: "no"
+    depends_on:
+      vault:
+        condition: service_healthy
+    environment:
+      - VAULT_ADDR=http://gofr-vault-test:8200
+      - VAULT_TOKEN=gofr-dev-root-token
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "Seeding test secrets into Vault..."
+        vault kv put secret/gofr/config/jwt-signing-secret \
+          value="test-secret-key-for-secure-testing-do-not-use-in-production"
+        echo "Vault secrets seeded successfully."
+    networks:
+      - gofr-test-net
+
+  # ==========================================================================
   # 1. MCP Server (Core Logic)
   # ==========================================================================
   mcp:
@@ -41,6 +91,9 @@ services:
     user: root
     working_dir: /home/gofr-dig
     entrypoint: ["/bin/sh", "-c"]
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
     command:
       - |
         mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
@@ -54,12 +107,10 @@ services:
         fi
         if [ "$${GOFR_DIG_NO_AUTH:-1}" = "1" ]; then
           NOAUTH="--no-auth"
-          JWT=""
         else
           NOAUTH=""
-          JWT="--jwt-secret $${GOFR_JWT_SECRET}"
         fi
-        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port $${GOFR_DIG_MCP_PORT} $$NOAUTH $$JWT"
+        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port $${GOFR_DIG_MCP_PORT} $$NOAUTH"
     environment:
       - GOFR_DIG_ENV=TEST
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
@@ -72,10 +123,9 @@ services:
       - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-1}
       - GOFR_DIG_USE_VAULT_IDENTITY=${GOFR_DIG_USE_VAULT_IDENTITY:-0}
       # Auth backend (vault only)
-      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
-      - GOFR_JWT_SECRET=${GOFR_JWT_SECRET:-}
-      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
-      - GOFR_DIG_VAULT_TOKEN=${GOFR_DIG_VAULT_TOKEN:-}
+      - GOFR_DIG_AUTH_BACKEND=vault
+      - GOFR_DIG_VAULT_URL=http://gofr-vault-test:8200
+      - GOFR_DIG_VAULT_TOKEN=gofr-dev-root-token
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:
@@ -130,6 +180,9 @@ services:
     user: root
     working_dir: /home/gofr-dig
     entrypoint: ["/bin/sh", "-c"]
+    depends_on:
+      vault-init:
+        condition: service_completed_successfully
     command:
       - |
         mkdir -p /home/gofr-dig/logs
@@ -146,9 +199,9 @@ services:
       - GOFR_DIG_DATA_DIR=/home/gofr-dig/data
       - GOFR_DIG_STORAGE_DIR=/home/gofr-dig/data/storage
       # Auth backend — vault only
-      - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
-      - GOFR_JWT_SECRET=${GOFR_JWT_SECRET:-}
-      - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
+      - GOFR_DIG_AUTH_BACKEND=vault
+      - GOFR_DIG_VAULT_URL=http://gofr-vault-test:8200
+      - GOFR_DIG_VAULT_TOKEN=gofr-dev-root-token
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:

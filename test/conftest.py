@@ -7,6 +7,8 @@ auth service setup, and test server token management.
 import os
 import sys
 from pathlib import Path
+from typing import cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from uuid import uuid4
 
-from gofr_common.auth import AuthService, GroupRegistry
+from gofr_common.auth import AuthService, GroupRegistry, JwtSecretProvider
 from gofr_common.auth.backends import VaultClient, VaultConfig, VaultGroupStore, VaultTokenStore
 from app.config import Config
 
@@ -31,6 +33,12 @@ TEST_JWT_SECRET = "test-secret-key-for-secure-testing-do-not-use-in-production"
 TEST_GROUP = "test_group"
 
 
+def make_test_secret_provider(secret: str = TEST_JWT_SECRET) -> JwtSecretProvider:
+    mock_vault_client = MagicMock()
+    mock_vault_client.read_secret = MagicMock(return_value={"value": secret})
+    return JwtSecretProvider(vault_client=cast(VaultClient, mock_vault_client))
+
+
 def _create_test_auth_service(vault_client: VaultClient, path_prefix: str) -> AuthService:
     """Create an AuthService backed by Vault for testing.
 
@@ -43,10 +51,11 @@ def _create_test_auth_service(vault_client: VaultClient, path_prefix: str) -> Au
     group_registry = GroupRegistry(store=group_store)  # auto-bootstraps public, admin
     group_registry.create_group(TEST_GROUP, "Test group for test suite")
 
+    secret_provider = make_test_secret_provider()
     return AuthService(
         token_store=token_store,
         group_registry=group_registry,
-        secret_key=TEST_JWT_SECRET,
+        secret_provider=secret_provider,
         env_prefix="GOFR_DIG",
     )
 

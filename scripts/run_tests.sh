@@ -77,7 +77,6 @@ else
 fi
 
 # Test configuration
-export GOFR_JWT_SECRET="test-secret-key-for-secure-testing-do-not-use-in-production"
 export GOFR_DIG_AUTH_BACKEND="vault"
 # Test ports come from gofr_ports.env (sourced above) — no hardcoded fallbacks
 export GOFR_DIG_MCP_PORT_TEST="${GOFR_DIG_MCP_PORT_TEST:?GOFR_DIG_MCP_PORT_TEST not set — source gofr_ports.env}"
@@ -103,7 +102,6 @@ mkdir -p "${GOFR_DIG_STORAGE:-${PROJECT_ROOT}/data/storage}"
 
 # Vault test configuration
 VAULT_CONTAINER_NAME="gofr-vault-test"
-VAULT_IMAGE="hashicorp/vault:1.15.4"
 VAULT_INTERNAL_PORT=8200
 VAULT_TEST_PORT="${GOFR_VAULT_PORT_TEST:?GOFR_VAULT_PORT_TEST not set — source gofr_ports.env}"
 VAULT_TEST_TOKEN="${GOFR_TEST_VAULT_DEV_TOKEN:-gofr-dev-root-token}"
@@ -171,7 +169,7 @@ run_code_quality_gate() {
 }
 
 start_vault_test_container() {
-    echo -e "${BLUE}Starting Vault in ephemeral dev mode...${NC}"
+    echo -e "${BLUE}Ensuring test network and Vault env vars...${NC}"
 
     is_running_in_docker() {
         [ -f "/.dockerenv" ] && return 0
@@ -199,91 +197,26 @@ start_vault_test_container() {
         fi
     done
 
-    if ! docker images "${VAULT_IMAGE}" --format '{{.Repository}}' | grep -q "vault"; then
-        echo -e "${YELLOW}Pulling Vault image: ${VAULT_IMAGE}${NC}"
-        docker pull "${VAULT_IMAGE}"
-    fi
-
-    if docker ps -aq -f name="^${VAULT_CONTAINER_NAME}$" | grep -q .; then
-        echo "Removing existing Vault test container..."
-        docker rm -f "${VAULT_CONTAINER_NAME}" 2>/dev/null || true
-    fi
-
-    echo "Starting ${VAULT_CONTAINER_NAME} (dev mode, port ${VAULT_TEST_PORT}->${VAULT_INTERNAL_PORT})..."
-    docker run -d \
-        --name "${VAULT_CONTAINER_NAME}" \
-        --hostname "${VAULT_CONTAINER_NAME}" \
-        --network "${TEST_NETWORK}" \
-        --cap-add IPC_LOCK \
-        -p "${VAULT_TEST_PORT}:${VAULT_INTERNAL_PORT}" \
-        -e "VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TEST_TOKEN}" \
-        -e "VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:${VAULT_INTERNAL_PORT}" \
-        -e "VAULT_LOG_LEVEL=warn" \
-        "${VAULT_IMAGE}" \
-        server -dev > /dev/null
-
-    echo -n "Waiting for Vault to be ready"
-    local retries=0
-    local max_retries=30
-    while [ $retries -lt $max_retries ]; do
-        if docker exec -e VAULT_ADDR="http://127.0.0.1:${VAULT_INTERNAL_PORT}" \
-            "${VAULT_CONTAINER_NAME}" vault status > /dev/null 2>&1; then
-            echo " ready!"
-            break
-        fi
-        echo -n "."
-        sleep 1
-        retries=$((retries + 1))
-    done
-    if [ $retries -eq $max_retries ]; then
-        echo ""
-        echo -e "${RED}Vault failed to start within ${max_retries}s${NC}"
-        docker logs "${VAULT_CONTAINER_NAME}" 2>&1
-        return 1
-    fi
-
-    docker exec -e VAULT_ADDR="http://127.0.0.1:${VAULT_INTERNAL_PORT}" \
-        -e VAULT_TOKEN="${VAULT_TEST_TOKEN}" \
-        "${VAULT_CONTAINER_NAME}" \
-        vault secrets enable -path=secret -version=2 kv 2>/dev/null || true
-
-    # Vault access for the pytest process.
-    # In Docker mode, pytest runs in the dev container and should talk to Vault
-    # via the container hostname on the shared test network.
     if is_running_in_docker; then
+        # Vault is started by docker/compose.dev.yml.
         export GOFR_DIG_VAULT_URL="http://${VAULT_CONTAINER_NAME}:${VAULT_INTERNAL_PORT}"
-
-        # Fail fast if Docker DNS is not available (prevents flaky mid-suite failures).
-        if ! getent hosts "${VAULT_CONTAINER_NAME}" > /dev/null 2>&1; then
-            echo -e "${RED}FATAL: Cannot resolve ${VAULT_CONTAINER_NAME} from the test runner.${NC}"
-            echo "Expected: dev container attached to '${TEST_NETWORK}' so Docker DNS can resolve service names."
-            echo "Try: docker network connect ${TEST_NETWORK} gofr-dig-dev"
-            return 1
-        fi
     else
-        # Localhost mode: use the published test port.
         export GOFR_DIG_VAULT_URL="http://127.0.0.1:${VAULT_TEST_PORT}"
     fi
     export GOFR_DIG_VAULT_TOKEN="${VAULT_TEST_TOKEN}"
 
-    echo -e "${GREEN}Vault started successfully${NC}"
-    echo "  Container: ${VAULT_CONTAINER_NAME}"
-    echo "  Network:   ${TEST_NETWORK}"
-    echo "  URL:       ${GOFR_DIG_VAULT_URL}"
-    echo "  Token:     ${GOFR_DIG_VAULT_TOKEN}"
+    # gofr-common tests use the generic GOFR_VAULT_* env vars
+    export GOFR_VAULT_URL="${GOFR_DIG_VAULT_URL}"
+    export GOFR_VAULT_TOKEN="${GOFR_DIG_VAULT_TOKEN}"
+
+    echo -e "${GREEN}Vault env vars set for pytest${NC}"
+    echo "  URL:   ${GOFR_DIG_VAULT_URL}"
+    echo "  Token: ${GOFR_DIG_VAULT_TOKEN}"
     echo ""
 }
 
 stop_vault_test_container() {
-    echo -e "${YELLOW}Stopping Vault test container...${NC}"
-    if docker ps -q -f name="^${VAULT_CONTAINER_NAME}$" | grep -q .; then
-        docker stop ${VAULT_CONTAINER_NAME} 2>/dev/null || true
-        docker rm ${VAULT_CONTAINER_NAME} 2>/dev/null || true
-        echo -e "${GREEN}Vault container stopped${NC}"
-    else
-        echo "Vault container was not running"
-    fi
-
+    # Vault is managed by docker/compose.dev.yml -- nothing to stop here.
     for dev_name in "${DEV_CONTAINER_NAMES[@]}"; do
         if docker ps --format '{{.Names}}' | grep -q "^${dev_name}$"; then
             docker network disconnect "${TEST_NETWORK}" "${dev_name}" 2>/dev/null || true

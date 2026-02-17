@@ -6,8 +6,13 @@ import os
 import sys
 
 from app.web_server.web_server import GofrDigWebServer
-from gofr_common.auth import AuthService, GroupRegistry, create_stores_from_env
-from gofr_common.auth.config import resolve_auth_config
+from gofr_common.auth import (
+    AuthService,
+    GroupRegistry,
+    JwtSecretProvider,
+    create_stores_from_env,
+    create_vault_client_from_env,
+)
 from app.logger import Logger, session_logger
 import app.startup.validation
 
@@ -56,48 +61,48 @@ if __name__ == "__main__":
         help="Port number to listen on (from GOFR_DIG_WEB_PORT env var)",
     )
     parser.add_argument(
-        "--jwt-secret",
-        type=str,
-        default=None,
-        help="JWT secret key (default: read from Vault, or GOFR_JWT_SECRET env var)",
-    )
-    parser.add_argument(
         "--no-auth",
         action="store_true",
         help="Disable authentication (WARNING: insecure, for development only)",
     )
     args = parser.parse_args()
 
-    # Validate JWT secret if authentication is enabled
-    jwt_secret, _require_auth = resolve_auth_config(
-        env_prefix="GOFR_DIG",
-        jwt_secret_arg=args.jwt_secret,
-        require_auth=not args.no_auth,
-        logger=logger,
-    )
-
-    # Initialize AuthService if authentication is enabled
     auth_service = None
-    if jwt_secret:
-        token_store, group_store = create_stores_from_env(prefix="GOFR_DIG")
-        group_registry = GroupRegistry(store=group_store)
-        auth_service = AuthService(
-            token_store=token_store,
-            group_registry=group_registry,
-            secret_key=jwt_secret,
-            env_prefix="GOFR_DIG",
-            audience="gofr-api",
-        )
-        logger.info(
-            "Authentication service initialized",
-            jwt_enabled=True,
-            backend=type(token_store).__name__,
-        )
-    else:
+    if args.no_auth:
         logger.warning(
             "Authentication DISABLED - running in no-auth mode (INSECURE)",
             jwt_enabled=False,
         )
+    else:
+        try:
+            vault_client = create_vault_client_from_env("GOFR_DIG", logger=logger)
+            secret_provider = JwtSecretProvider(vault_client=vault_client, logger=logger)
+            token_store, group_store = create_stores_from_env(
+                "GOFR_DIG",
+                vault_client=vault_client,
+                logger=logger,
+            )
+            group_registry = GroupRegistry(store=group_store)
+            auth_service = AuthService(
+                token_store=token_store,
+                group_registry=group_registry,
+                secret_provider=secret_provider,
+                env_prefix="GOFR_DIG",
+                audience="gofr-api",
+                logger=logger,
+            )
+            logger.info(
+                "Authentication service initialized",
+                jwt_enabled=True,
+                backend=type(token_store).__name__,
+            )
+        except Exception as e:
+            logger.error(
+                "FATAL: Authentication initialization failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            sys.exit(1)
 
     # Initialize server
     server = GofrDigWebServer(

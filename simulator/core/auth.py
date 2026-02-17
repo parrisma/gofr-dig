@@ -8,8 +8,10 @@ from gofr_common.auth import (
     AuthService,
     DuplicateGroupError,
     GroupRegistry,
+    JwtSecretProvider,
     InvalidGroupError,
     create_stores_from_env,
+    create_vault_client_from_env,
 )
 
 
@@ -29,7 +31,7 @@ class TokenFactory:
     Uses the same Vault-backed stores as the service under test.
 
     Notes:
-    - The JWT signing secret is loaded by AuthService via GOFR_JWT_SECRET.
+    - The JWT signing secret is loaded from Vault via JwtSecretProvider.
     - Group names are expected to exist; this factory can create them if missing.
     """
 
@@ -51,11 +53,18 @@ class TokenFactory:
 
         os.environ.setdefault(f"{env_prefix}_VAULT_PATH_PREFIX", "gofr/auth")
 
-        token_store, group_store = create_stores_from_env(env_prefix, logger=self._logger)
+        vault_client = create_vault_client_from_env(env_prefix, logger=self._logger)
+        secret_provider = JwtSecretProvider(vault_client=vault_client, logger=self._logger)
+        token_store, group_store = create_stores_from_env(
+            env_prefix,
+            vault_client=vault_client,
+            logger=self._logger,
+        )
         group_registry = GroupRegistry(store=group_store)
         self._auth = AuthService(
             token_store=token_store,
             group_registry=group_registry,
+            secret_provider=secret_provider,
             env_prefix=env_prefix,
             audience=audience,
             logger=self._logger,

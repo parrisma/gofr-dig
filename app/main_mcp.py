@@ -2,8 +2,13 @@ import argparse
 import os
 import sys
 import asyncio
-from gofr_common.auth import AuthService, GroupRegistry, create_stores_from_env
-from gofr_common.auth.config import resolve_auth_config
+from gofr_common.auth import (
+    AuthService,
+    GroupRegistry,
+    JwtSecretProvider,
+    create_stores_from_env,
+    create_vault_client_from_env,
+)
 from app.logger import Logger, session_logger
 import app.startup.validation
 
@@ -32,12 +37,6 @@ if __name__ == "__main__":
         type=int,
         default=int(os.environ["GOFR_DIG_MCP_PORT"]),
         help="Port number to listen on (from GOFR_DIG_MCP_PORT env var)",
-    )
-    parser.add_argument(
-        "--jwt-secret",
-        type=str,
-        default=None,
-        help="JWT secret key (default: read from Vault, or GOFR_JWT_SECRET env var)",
     )
     parser.add_argument(
         "--no-auth",
@@ -94,36 +93,42 @@ if __name__ == "__main__":
         result=sink_status,
     )
 
-    # Resolve authentication configuration
-    jwt_secret, _require_auth = resolve_auth_config(
-        env_prefix="GOFR_DIG",
-        jwt_secret_arg=args.jwt_secret,
-        require_auth=not args.no_auth,
-        logger=startup_logger,
-    )
-
-    # Initialize auth service only if auth is required
     auth_service = None
-    if jwt_secret:
-        token_store, group_store = create_stores_from_env(prefix="GOFR_DIG")
-        group_registry = GroupRegistry(store=group_store)
-        auth_service = AuthService(
-            token_store=token_store,
-            group_registry=group_registry,
-            secret_key=jwt_secret,
-            env_prefix="GOFR_DIG",
-            audience="gofr-api",
-        )
-        startup_logger.info(
-            "Authentication service initialized",
-            jwt_enabled=True,
-            backend=type(token_store).__name__,
-        )
-    else:
+    if args.no_auth:
         startup_logger.warning(
             "Authentication DISABLED - running in no-auth mode (INSECURE)",
             jwt_enabled=False,
         )
+    else:
+        try:
+            vault_client = create_vault_client_from_env("GOFR_DIG", logger=startup_logger)
+            secret_provider = JwtSecretProvider(vault_client=vault_client, logger=startup_logger)
+            token_store, group_store = create_stores_from_env(
+                "GOFR_DIG",
+                vault_client=vault_client,
+                logger=startup_logger,
+            )
+            group_registry = GroupRegistry(store=group_store)
+            auth_service = AuthService(
+                token_store=token_store,
+                group_registry=group_registry,
+                secret_provider=secret_provider,
+                env_prefix="GOFR_DIG",
+                audience="gofr-api",
+                logger=startup_logger,
+            )
+            startup_logger.info(
+                "Authentication service initialized",
+                jwt_enabled=True,
+                backend=type(token_store).__name__,
+            )
+        except Exception as e:
+            startup_logger.error(
+                "FATAL: Authentication initialization failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            sys.exit(1)
 
     # Import and configure mcp_server with auth service
     import app.mcp_server.mcp_server as mcp_server_module
