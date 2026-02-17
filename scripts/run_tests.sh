@@ -288,6 +288,7 @@ COVERAGE=false
 COVERAGE_HTML=false
 RUN_INTEGRATION=false
 RUN_ALL=false
+RUN_SIMULATOR=false
 STOP_ONLY=false
 CLEANUP_ONLY=false
 USE_DOCKER=true   # Default: use Docker container hostnames for integration tests
@@ -307,6 +308,11 @@ while [[ $# -gt 0 ]]; do
         --integration)
             RUN_INTEGRATION=true
             START_SERVERS=true
+            shift
+            ;;
+        --simulator)
+            RUN_SIMULATOR=true
+            START_SERVERS=false
             shift
             ;;
         --all)
@@ -345,6 +351,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --coverage       Run with coverage report"
             echo "  --coverage-html  Run with HTML coverage report"
             echo "  --integration    Run integration tests only (with servers)"
+            echo "  --simulator      Run simulator tests only (no servers needed)"
             echo "  --all            Run all test categories"
             echo "  --docker         Use Docker hostnames for integration tests (default)"
             echo "  --no-docker      Use localhost+published ports for integration tests"
@@ -452,6 +459,11 @@ TEST_EXIT_CODE=0
 if [ "$RUN_INTEGRATION" = true ]; then
     echo -e "${BLUE}Running integration tests (with servers)...${NC}"
     uv run python -m pytest ${TEST_DIR}/integration/ -v ${COVERAGE_ARGS}
+    TEST_EXIT_CODE=$?
+
+elif [ "$RUN_SIMULATOR" = true ]; then
+    echo -e "${BLUE}Running simulator tests (no servers)...${NC}"
+    uv run python -m pytest ${TEST_DIR}/simulator/ -v ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 
 elif [ "$RUN_ALL" = true ]; then

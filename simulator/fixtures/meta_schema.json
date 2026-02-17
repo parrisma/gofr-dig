@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Metadata for a recorded fixture set produced by the gofr-dig simulator recorder.",
+  "type": "object",
+  "required": ["version", "recorded_at", "sites"],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "description": "Schema version. Currently 1.",
+      "const": 1
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp of the recording run."
+    },
+    "sites": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slug", "original_url", "files"],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Filesystem-safe identifier derived from the site domain (e.g. asia_nikkei_com)."
+          },
+          "original_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The original URL that was fetched."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["path", "content_type", "original_status"],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "Relative path under the site slug directory (e.g. index.html)."
+                },
+                "content_type": {
+                  "type": "string",
+                  "description": "Original Content-Type header value."
+                },
+                "original_status": {
+                  "type": "integer",
+                  "description": "HTTP status code of the original response."
+                },
+                "size_bytes": {
+                  "type": "integer",
+                  "description": "Size of the obfuscated file in bytes."
+                },
+                "obfuscated": {
+                  "type": "boolean",
+                  "description": "Whether the file was passed through the obfuscator.",
+                  "default": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

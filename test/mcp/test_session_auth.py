@@ -5,7 +5,7 @@ Covers:
 - Valid token → session tagged with group
 - Group match → access allowed
 - Group mismatch → PERMISSION_DENIED
-- Multi-group tokens → first group used
+- Multi-group tokens → read/list allowed for any group in the token
 - Invalid tokens → AUTH_ERROR
 - Group-scoped listing
 - No-auth mode (auth_service=None) → all sessions accessible
@@ -23,6 +23,7 @@ from gofr_common.storage.exceptions import PermissionDeniedError
 from app.mcp_server.mcp_server import (
     handle_call_tool,
     _resolve_group_from_token,
+    _resolve_groups_from_token,
 )
 from app.session.manager import SessionManager
 from conftest import _create_test_auth_service, _build_vault_client
@@ -113,6 +114,26 @@ class TestResolveGroupFromToken:
             result = _resolve_group_from_token(token)
             assert result == "team-a"
 
+
+class TestResolveGroupsFromToken:
+    """Unit tests for the _resolve_groups_from_token helper."""
+
+    def test_none_when_auth_disabled(self):
+        with patch("app.mcp_server.mcp_server.auth_service", None):
+            assert _resolve_groups_from_token("anything") is None
+
+    def test_none_when_no_tokens(self):
+        svc = _make_auth_service()
+        with patch("app.mcp_server.mcp_server.auth_service", svc):
+            assert _resolve_groups_from_token(None) is None
+            assert _resolve_groups_from_token("") is None
+
+    def test_returns_all_groups(self):
+        svc = _make_auth_service()
+        token = _create_token(["team-a", "team-b"], svc)
+        with patch("app.mcp_server.mcp_server.auth_service", svc):
+            assert _resolve_groups_from_token(token) == ["team-a", "team-b"]
+
     def test_strips_bearer_prefix(self):
         """Bearer prefix is stripped before verification."""
         svc = _make_auth_service()
@@ -164,7 +185,7 @@ class TestMCPSessionAuthHandlers:
                 "get_session_info",
                 {"session_id": "s1", "auth_token": token},
             )
-            mgr.get_session_info.assert_called_with("s1", group="team-a")
+            mgr.get_session_info.assert_called_with("s1", group=["team-a"])
 
     @pytest.mark.asyncio
     async def test_permission_denied_on_group_mismatch(self):
@@ -213,7 +234,7 @@ class TestMCPSessionAuthHandlers:
                 "get_session_chunk",
                 {"session_id": "s1", "chunk_index": 0, "auth_token": token},
             )
-            mgr.get_chunk.assert_called_with("s1", 0, group="team-c")
+            mgr.get_chunk.assert_called_with("s1", 0, group=["team-c"])
 
     @pytest.mark.asyncio
     async def test_get_session_chunk_permission_denied(self):
@@ -245,7 +266,7 @@ class TestMCPSessionAuthHandlers:
                 "list_sessions",
                 {"auth_token": token},
             )
-            mgr.list_sessions.assert_called_once_with(group="team-a")
+            mgr.list_sessions.assert_called_once_with(group=["team-a"])
 
     @pytest.mark.asyncio
     async def test_list_sessions_anonymous(self):
@@ -273,9 +294,51 @@ class TestMCPSessionAuthHandlers:
                     "auth_token": token,
                 },
             )
-            mgr.get_session_info.assert_called_with("s1", group="team-d")
+            mgr.get_session_info.assert_called_with("s1", group=["team-d"])
             data = json.loads(result[0].text)  # type: ignore[index]
             assert data["success"] is True
+
+    @pytest.mark.asyncio
+    async def test_multi_group_token_can_read_and_list_across_groups(self, tmp_path):
+        """Multi-group token should be able to read/list sessions for any group in the token.
+
+        This validates the server-side semantics needed for the simulator's
+        cross-group read checks.
+        """
+        svc = _make_auth_service()
+
+        # Create token with access to two groups.
+        token = _create_token(["team-a", "team-b"], svc)
+
+        # Real session manager with isolated file storage.
+        manager = SessionManager(storage_dir=tmp_path)
+        session_a = manager.create_session({"k": "v"}, url="http://a.example", group="team-a")
+        session_b = manager.create_session({"k": "v"}, url="http://b.example", group="team-b")
+
+        with patch("app.mcp_server.mcp_server.session_manager", manager), \
+             patch("app.mcp_server.mcp_server.auth_service", svc):
+            # Read across groups
+            result_a = await handle_call_tool(
+                "get_session_info",
+                {"session_id": session_a, "auth_token": token},
+            )
+            data_a = json.loads(result_a[0].text)  # type: ignore[index]
+            assert data_a["session_id"] == session_a
+
+            result_b = await handle_call_tool(
+                "get_session_info",
+                {"session_id": session_b, "auth_token": token},
+            )
+            data_b = json.loads(result_b[0].text)  # type: ignore[index]
+            assert data_b["session_id"] == session_b
+
+            # List across groups
+            result_list = await handle_call_tool(
+                "list_sessions",
+                {"auth_token": token},
+            )
+            data_list = json.loads(result_list[0].text)  # type: ignore[index]
+            assert data_list["total"] == 2
 
     @pytest.mark.asyncio
     async def test_get_session_urls_permission_denied(self):

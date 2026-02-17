@@ -95,7 +95,7 @@ class TestCodeQuality:
             x = calculate()  # noqa: F841 - used in debugging
         """
         # Directories to check
-        check_dirs = ["app", "test", "scripts"]
+        check_dirs = ["app", "test", "scripts", "simulator"]
 
         # Run ruff check
         result = subprocess.run(
@@ -170,7 +170,7 @@ class TestCodeQuality:
                 return x
         """
         # Directories to check
-        check_dirs = ["app", "test", "scripts"]
+        check_dirs = ["app", "test", "scripts", "simulator"]
 
         # Run pyright check
         cmd = pyright_executable.split() + check_dirs

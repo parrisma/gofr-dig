@@ -1,16 +1,38 @@
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
+
 from gofr_common.storage import FileStorage, PermissionDeniedError
+
 from app.exceptions import SessionNotFoundError, SessionValidationError
+
+
+GroupScope = str | Sequence[str] | None
+
+
+def _is_group_allowed(stored_group: str | None, scope: GroupScope) -> bool:
+    if scope is None:
+        return True
+    if stored_group is None:
+        # Public/unscoped session: allow access.
+        return True
+    if isinstance(scope, str):
+        return stored_group == scope
+    return stored_group in scope
 
 class SessionManager:
     def __init__(self, storage_dir: Path | str, default_chunk_size: int = 4000):
         self.storage = FileStorage(storage_dir)
         self.default_chunk_size = default_chunk_size
 
-    def create_session(self, content: Any, url: str, group: Optional[str] = None, chunk_size: Optional[int] = None) -> str:
+    def create_session(
+        self,
+        content: Any,
+        url: str,
+        group: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+    ) -> str:
         """
         Create a new session from content.
         
@@ -50,7 +72,7 @@ class SessionManager:
         
         return guid
 
-    def get_session_info(self, session_id: str, group: Optional[str] = None) -> Dict[str, Any]:
+    def get_session_info(self, session_id: str, group: GroupScope = None) -> Dict[str, Any]:
         """
         Get metadata for a session.
         
@@ -82,7 +104,7 @@ class SessionManager:
                 {"session_id": session_id},
             )
             
-        if group and metadata.group and metadata.group != group:
+        if not _is_group_allowed(metadata.group, group):
             raise PermissionDeniedError(f"Access denied to session {session_id}")
             
         return {
@@ -96,7 +118,7 @@ class SessionManager:
             "group": metadata.group
         }
 
-    def list_sessions(self, group: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(self, group: GroupScope = None) -> List[Dict[str, Any]]:
         """
         List all sessions, optionally filtered by group.
 
@@ -106,7 +128,18 @@ class SessionManager:
         Returns:
             List of session info dicts (same shape as get_session_info output).
         """
-        guids = self.storage.metadata_repo.list_all(group=group)
+        if group is None or isinstance(group, str):
+            guids = self.storage.metadata_repo.list_all(group=group)
+        else:
+            # Aggregate across multiple groups.
+            seen: set[str] = set()
+            guids = []
+            for g in group:
+                for guid in self.storage.metadata_repo.list_all(group=g):
+                    if guid in seen:
+                        continue
+                    seen.add(guid)
+                    guids.append(guid)
         sessions: List[Dict[str, Any]] = []
         for guid in guids:
             metadata = self.storage.metadata_repo.get(guid)
@@ -124,7 +157,7 @@ class SessionManager:
             })
         return sessions
 
-    def get_chunk(self, session_id: str, chunk_index: int, group: Optional[str] = None) -> str:
+    def get_chunk(self, session_id: str, chunk_index: int, group: GroupScope = None) -> str:
         """
         Get a specific chunk of text content.
         
@@ -136,8 +169,12 @@ class SessionManager:
         Returns:
             Text content of the chunk
         """
-        # Retrieve full data (this checks permission)
-        result = self.storage.get(session_id, group=group)
+        info = self.get_session_info(session_id, group=group)
+        stored_group = info.get("group")
+
+        # Retrieve full data (this checks permission). For multi-group scopes,
+        # we pass the session's stored group to satisfy FileStorage's group check.
+        result = self.storage.get(session_id, group=stored_group)
         if not result:
             raise SessionNotFoundError(
                 "SESSION_NOT_FOUND",
@@ -148,10 +185,6 @@ class SessionManager:
         data_bytes, fmt = result
         text_content = data_bytes.decode("utf-8")
         
-        # Get metadata for chunk size
-        # We can use the internal metadata since we already verified permission via get()
-        # But let's use get_session_info for consistency and to get the stored chunk_size
-        info = self.get_session_info(session_id, group=group)
         chunk_size = info["chunk_size"]
         total_chunks = info["total_chunks"]
         

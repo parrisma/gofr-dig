@@ -1,0 +1,10 @@
+{
+  "groups": {
+    "apac": { "count": 3, "token": "token_apac" },
+    "emea": { "count": 3, "token": "token_emea" },
+    "us":   { "count": 3, "token": "token_us" },
+    "multi": { "count": 1, "token": "token_multi" },
+    "public": { "count": 1, "token": null },
+    "attacker": { "count": 1, "token": "token_invalid" }
+  }
+}

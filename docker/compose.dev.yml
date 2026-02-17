@@ -45,11 +45,21 @@ services:
       - |
         mkdir -p /home/gofr-dig/data/storage /home/gofr-dig/data/auth /home/gofr-dig/logs
         chown -R gofr-dig:gofr-dig /home/gofr-dig/data /home/gofr-dig/logs
-        # Copy service creds from shared volume to VaultIdentity's expected path
-        mkdir -p /run/secrets
-        cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
-        chown gofr-dig:gofr-dig /run/secrets/vault_creds
-        exec su -s /bin/bash gofr-dig -c '/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port ${GOFR_DIG_MCP_PORT} --no-auth'
+        # VaultIdentity/AppRole is optional in the dev stack. By default we use
+        # token-based Vault auth via GOFR_DIG_VAULT_TOKEN.
+        if [ "$${GOFR_DIG_USE_VAULT_IDENTITY:-0}" = "1" ]; then
+          mkdir -p /run/secrets
+          cp /run/gofr-secrets/service_creds/gofr-dig.json /run/secrets/vault_creds
+          chown gofr-dig:gofr-dig /run/secrets/vault_creds
+        fi
+        if [ "$${GOFR_DIG_NO_AUTH:-1}" = "1" ]; then
+          NOAUTH="--no-auth"
+          JWT=""
+        else
+          NOAUTH=""
+          JWT="--jwt-secret $${GOFR_JWT_SECRET}"
+        fi
+        exec su -s /bin/bash gofr-dig -c "/home/gofr-dig/.venv/bin/python -m app.main_mcp --host 0.0.0.0 --port $${GOFR_DIG_MCP_PORT} $$NOAUTH $$JWT"
     environment:
       - GOFR_DIG_ENV=TEST
       - GOFR_DIG_MCP_PORT=${GOFR_DIG_MCP_PORT}
@@ -59,10 +69,13 @@ services:
       - GOFR_DIG_ALLOW_PRIVATE_URLS=${GOFR_DIG_ALLOW_PRIVATE_URLS:-false}
       - GOFR_DIG_RATE_LIMIT_CALLS=${GOFR_DIG_RATE_LIMIT_CALLS:-60}
       - GOFR_DIG_RATE_LIMIT_WINDOW=${GOFR_DIG_RATE_LIMIT_WINDOW:-60}
+      - GOFR_DIG_NO_AUTH=${GOFR_DIG_NO_AUTH:-1}
+      - GOFR_DIG_USE_VAULT_IDENTITY=${GOFR_DIG_USE_VAULT_IDENTITY:-0}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=${GOFR_DIG_AUTH_BACKEND:-vault}
       - GOFR_JWT_SECRET=${GOFR_JWT_SECRET:-}
       - GOFR_DIG_VAULT_URL=${GOFR_DIG_VAULT_URL:-http://gofr-vault:${GOFR_VAULT_PORT}}
+      - GOFR_DIG_VAULT_TOKEN=${GOFR_DIG_VAULT_TOKEN:-}
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
     ports:

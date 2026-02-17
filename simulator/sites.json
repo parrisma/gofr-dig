@@ -1,0 +1,132 @@
+{
+    "Japan": [
+        {
+            "name": "Nikkei Asia",
+            "url": "https://asia.nikkei.com",
+            "languages": [
+                "Japanese",
+                "English"
+            ]
+        },
+        {
+            "name": "The Japan Times - Business",
+            "url": "https://www.japantimes.co.jp/business/",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Toyo Keizai",
+            "url": "https://toyokeizai.net",
+            "languages": [
+                "Japanese",
+                "English (limited)"
+            ]
+        }
+    ],
+    "China": [
+        {
+            "name": "Caixin Global",
+            "url": "https://www.caixinglobal.com",
+            "languages": [
+                "Chinese",
+                "English"
+            ]
+        },
+        {
+            "name": "South China Morning Post - Business",
+            "url": "https://www.scmp.com/business",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Yicai Global",
+            "url": "https://www.yicaiglobal.com",
+            "languages": [
+                "Chinese",
+                "English"
+            ]
+        }
+    ],
+    "Indonesia": [
+        {
+            "name": "Jakarta Post - Business",
+            "url": "https://www.thejakartapost.com/business",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Kontan",
+            "url": "https://www.kontan.co.id",
+            "languages": [
+                "Indonesian",
+                "English (limited)"
+            ]
+        },
+        {
+            "name": "Bisnis Indonesia",
+            "url": "https://www.bisnis.com",
+            "languages": [
+                "Indonesian",
+                "English (summaries)"
+            ]
+        }
+    ],
+    "Thailand": [
+        {
+            "name": "Bangkok Post - Business",
+            "url": "https://www.bangkokpost.com/business",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Krungthep Turakij",
+            "url": "https://www.bangkokbiznews.com",
+            "languages": [
+                "Thai",
+                "English (briefs)"
+            ]
+        },
+        {
+            "name": "The Nation - Business",
+            "url": "https://www.nationthailand.com/business",
+            "languages": [
+                "English"
+            ]
+        }
+    ],
+    "India": [
+        {
+            "name": "Business Standard",
+            "url": "https://www.business-standard.com",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "The Hindu Business Line",
+            "url": "https://www.thehindubusinessline.com",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Mint",
+            "url": "https://www.livemint.com",
+            "languages": [
+                "English"
+            ]
+        },
+        {
+            "name": "Economic Times",
+            "url": "https://economictimes.indiatimes.com",
+            "languages": [
+                "English",
+                "Hindi"
+            ]
+        }
+    ]
+}

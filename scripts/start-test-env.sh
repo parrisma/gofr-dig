@@ -40,11 +40,17 @@ PORTS_ENV="$PROJECT_ROOT/lib/gofr-common/config/gofr_ports.env"
 FORCE_BUILD=false
 DO_DOWN=false
 PORT_OFFSET=0
+WITH_AUTH=false
+
+VAULT_CONTAINER_NAME="gofr-vault-test"
+VAULT_IMAGE="hashicorp/vault:1.15.4"
+VAULT_TOKEN_DEFAULT="gofr-dev-root-token"
 
 # ---- Parse arguments --------------------------------------------------------
 while [ $# -gt 0 ]; do
     case "$1" in
         --build)     FORCE_BUILD=true; shift ;;
+        --auth)      WITH_AUTH=true; shift ;;
         --port-offset)
             PORT_OFFSET="$2"
             if ! [[ "$PORT_OFFSET" =~ ^[0-9]+$ ]]; then
@@ -60,7 +66,7 @@ while [ $# -gt 0 ]; do
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--build] [--port-offset N] [--down] [--help]"
+            echo "Usage: $0 [--build] [--auth] [--port-offset N] [--down] [--help]"
             exit 1
             ;;
     esac
@@ -158,6 +164,16 @@ else
     ok "Network '$NETWORK_NAME' exists"
 fi
 
+# Ensure the dev container is attached to the same network so it can resolve
+# service hostnames (e.g., gofr-dig-mcp-test) via Docker DNS.
+# This is idempotent; Docker exits non-zero if already connected.
+if docker inspect gofr-dig-dev &>/dev/null 2>&1; then
+    docker network connect "$NETWORK_NAME" gofr-dig-dev &>/dev/null 2>&1 || true
+    ok "Dev container connected to '${NETWORK_NAME}' (or already connected)"
+else
+    warn "Dev container 'gofr-dig-dev' not found — skipping network connect"
+fi
+
 # ---- Start compose stack ----------------------------------------------------
 echo ""
 info "Starting gofr-dig dev stack..."
@@ -165,6 +181,37 @@ info "Starting gofr-dig dev stack..."
 export GOFR_DIG_ALLOW_PRIVATE_URLS=true
 export GOFR_DIG_RATE_LIMIT_CALLS=100000
 export GOFR_DIG_RATE_LIMIT_WINDOW=60
+
+if [ "$WITH_AUTH" = true ]; then
+    if [ -z "${GOFR_JWT_SECRET:-}" ]; then
+        fail "--auth requires GOFR_JWT_SECRET to be set"
+    fi
+
+    # Start a dev Vault container on the same network if not already running.
+    if ! docker inspect "${VAULT_CONTAINER_NAME}" &>/dev/null 2>&1; then
+        info "Starting Vault dev container (${VAULT_CONTAINER_NAME})..."
+        docker run -d --name "${VAULT_CONTAINER_NAME}" \
+            --network "${NETWORK_NAME}" \
+            --cap-add=IPC_LOCK \
+            -e "VAULT_DEV_ROOT_TOKEN_ID=${VAULT_TOKEN_DEFAULT}" \
+            -e "VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200" \
+            "${VAULT_IMAGE}" >/dev/null
+        ok "Vault dev container started"
+    else
+        ok "Vault dev container already exists"
+    fi
+
+    # Provide Vault connection details to the gofr-dig stack.
+    export GOFR_DIG_VAULT_URL="${GOFR_DIG_VAULT_URL:-http://${VAULT_CONTAINER_NAME}:8200}"
+    export GOFR_DIG_VAULT_TOKEN="${GOFR_DIG_VAULT_TOKEN:-${VAULT_TOKEN_DEFAULT}}"
+
+    export GOFR_DIG_NO_AUTH=0
+    ok "Auth ENABLED for dev stack (GOFR_DIG_NO_AUTH=0)"
+else
+    export GOFR_DIG_NO_AUTH=1
+    ok "Auth DISABLED for dev stack (default)"
+fi
+
 docker compose -f "$COMPOSE_FILE" up -d
 
 # ---- Health check -----------------------------------------------------------
@@ -213,12 +260,16 @@ echo "======================================================================="
 echo "  gofr-dig dev stack is running"
 echo "======================================================================="
 echo ""
-echo "  MCP Server:  http://localhost:${GOFR_DIG_MCP_HOST_PORT}/mcp"
-echo "  MCPO Server: http://localhost:${GOFR_DIG_MCPO_HOST_PORT}"
-echo "  Web Server:  http://localhost:${GOFR_DIG_WEB_HOST_PORT}"
+echo "  MCP Server:  http://host.docker.internal:${GOFR_DIG_MCP_HOST_PORT}/mcp"
+echo "  MCPO Server: http://host.docker.internal:${GOFR_DIG_MCPO_HOST_PORT}"
+echo "  Web Server:  http://host.docker.internal:${GOFR_DIG_WEB_HOST_PORT}"
 echo ""
 echo "  Network:     ${NETWORK_NAME}"
-echo "  Auth:        DISABLED (dev stack uses --no-auth)"
+if [ "$WITH_AUTH" = true ]; then
+    echo "  Auth:        ENABLED"
+else
+    echo "  Auth:        DISABLED (dev stack uses --no-auth)"
+fi
 echo ""
 echo "  Logs:    docker compose -f $COMPOSE_FILE logs -f"
 echo "  Status:  docker compose -f $COMPOSE_FILE ps"

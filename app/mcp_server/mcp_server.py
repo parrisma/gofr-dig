@@ -88,6 +88,32 @@ def _resolve_group_from_token(auth_token: str | None) -> str | None:
     return None  # valid token, no groups → anonymous
 
 
+def _resolve_groups_from_token(auth_token: str | None) -> list[str] | None:
+    """Resolve all groups from an auth_token.
+
+    Returns the groups list from the token, or None for anonymous/no-auth.
+
+    Raises AuthError if a token is provided but invalid.
+    """
+    if auth_service is None:
+        return None
+
+    if not auth_token:
+        return None
+
+    raw_token = auth_token
+    if raw_token.lower().startswith("bearer "):
+        raw_token = raw_token[7:].strip()
+    else:
+        raw_token = raw_token.strip()
+
+    if not raw_token:
+        return None
+
+    token_info = auth_service.verify_token(raw_token)
+    return list(token_info.groups or []) or None
+
+
 templates_dir_override: str | None = None
 styles_dir_override: str | None = None
 web_url_override: str | None = None
@@ -1736,7 +1762,7 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
 
     auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_token(auth_token)
+        groups = _resolve_groups_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1744,7 +1770,7 @@ async def _handle_get_session_info(arguments: Dict[str, Any]) -> List[TextConten
 
     try:
         manager = get_session_manager()
-        info = manager.get_session_info(session_id, group=group)
+        info = manager.get_session_info(session_id, group=groups)
         return [_json_text(info)]
     except Exception as e:
         if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
@@ -1769,7 +1795,7 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
 
     auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_token(auth_token)
+        groups = _resolve_groups_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1777,7 +1803,7 @@ async def _handle_get_session_chunk(arguments: Dict[str, Any]) -> List[TextConte
 
     try:
         manager = get_session_manager()
-        chunk_data = manager.get_chunk(session_id, chunk_index, group=group)
+        chunk_data = manager.get_chunk(session_id, chunk_index, group=groups)
         return [_json_text(chunk_data)]
     except Exception as e:
         if PermissionDeniedError is not None and isinstance(e, PermissionDeniedError):
@@ -1799,7 +1825,7 @@ async def _handle_list_sessions(arguments: Dict[str, Any]) -> List[TextContent]:
     """Handle list_sessions tool call."""
     auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_token(auth_token)
+        groups = _resolve_groups_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1807,7 +1833,7 @@ async def _handle_list_sessions(arguments: Dict[str, Any]) -> List[TextContent]:
 
     try:
         manager = get_session_manager()
-        sessions = manager.list_sessions(group=group)
+        sessions = manager.list_sessions(group=groups)
         return [_json_text({"sessions": sessions, "total": len(sessions)})]
     except GofrDigError as e:
         return _exception_response(e)
@@ -1848,7 +1874,7 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
 
     auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_token(auth_token)
+        groups = _resolve_groups_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1859,7 +1885,7 @@ async def _handle_get_session_urls(arguments: Dict[str, Any]) -> List[TextConten
 
     try:
         manager = get_session_manager()
-        info = manager.get_session_info(session_id, group=group)
+        info = manager.get_session_info(session_id, group=groups)
         total_chunks = info["total_chunks"]
 
         response: Dict[str, Any] = {
@@ -1914,7 +1940,7 @@ async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
 
     auth_token = arguments.get("auth_token")
     try:
-        group = _resolve_group_from_token(auth_token)
+        groups = _resolve_groups_from_token(auth_token)
     except Exception as e:
         if AuthError is not None and isinstance(e, AuthError):
             return _error_response("AUTH_ERROR", str(e))
@@ -1922,7 +1948,7 @@ async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
 
     try:
         manager = get_session_manager()
-        info = manager.get_session_info(session_id, group=group)
+        info = manager.get_session_info(session_id, group=groups)
         total_size = info.get("total_size_bytes", 0)
 
         if total_size > max_bytes:
@@ -1947,7 +1973,7 @@ async def _handle_get_session(arguments: Dict[str, Any]) -> List[TextContent]:
 
         async def _read_chunks():
             for i in range(total_chunks):
-                chunk_text = manager.get_chunk(session_id, i, group=group)
+                chunk_text = manager.get_chunk(session_id, i, group=groups)
                 parts.append(chunk_text)
 
         try:

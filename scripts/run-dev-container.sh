@@ -140,6 +140,7 @@ CONTAINER_ID=$(docker run -d \
     -v "$PROJECT_ROOT:/home/gofr/devroot/gofr-dig:rw" \
     -v ${VOLUME_NAME}:/home/gofr/devroot/gofr-dig/data:rw \
     -v ${SECRETS_VOLUME}:/home/gofr/devroot/gofr-dig/secrets:rw \
+    -v "$PROJECT_ROOT/../gofr-doc:/home/gofr/devroot/gofr-doc:ro" \
     $DOCKER_GID_ARGS \
     -e GOFRDIG_ENV=development \
     -e GOFRDIG_DEBUG=true \

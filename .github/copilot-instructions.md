@@ -67,12 +67,11 @@ Follow these three phases IN ORDER. Do NOT skip phases or combine them.
 ## TESTING
 
 - **Test runner:** ALWAYS use `./scripts/run_tests.sh`. It sets PYTHONPATH, environment variables, and manages service lifecycle. NEVER run `pytest` directly.
-- **Targeted first:** Run targeted tests (`./scripts/run_tests.sh --unit test/mcp/test_foo.py`) to get fast feedback before running the full suite.
 - **Full suite:** `./scripts/run_tests.sh` (no flags) runs everything including integration tests that depend on Vault, SEQ, etc. The script starts and stops these services automatically.
-- **Useful flags:** `--unit` (no servers), `--integration` (servers only), `--coverage`, `-k "keyword"`, `-v` (verbose).
+- **Useful flags:** `--coverage`, `-k "keyword"`, `-v` (verbose).
+- **Targeted first:** Run targeted tests -k to target new code or code that has issues.
 - **Fix what you break.** If tests fail — even tests that appear unrelated to your change — fix them before considering the work complete.
 - **Enhance the runner.** If `run_tests.sh` does not support something you need, modify it rather than working around it.
-
 ---
 
 ## MCP TOOLS
