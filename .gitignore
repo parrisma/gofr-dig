@@ -169,6 +169,9 @@ secrets/
 # Scratch / working files
 tmp/
 
+# Transient log/output files (keep tracked JSON token files)
+logs/*.txt
+
 # Data storage - sessions and documents
 data/sessions/**/*.json
 data/storage/**/*.json
