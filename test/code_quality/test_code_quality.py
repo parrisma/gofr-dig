@@ -16,9 +16,16 @@ from pathlib import Path
 
 import pytest
 
+from app.logger import session_logger as logger
+
 
 class TestCodeQuality:
     """Test suite for enforcing code quality standards."""
+
+    _MAX_SOURCE_LINES = 1000
+    _LARGE_FILE_ALLOWLIST = {
+        Path("app/mcp_server/mcp_server.py"),
+    }
 
     @pytest.fixture
     def project_root(self):
@@ -268,6 +275,70 @@ class TestCodeQuality:
                 ]
             )
             pytest.fail("\n".join(error_message))
+
+    def test_no_very_large_source_files(self, project_root):
+        """Pragmatic gate: fail if app/ contains very large Python source files.
+
+        This is complementary to Ruff/Pyright/Radon:
+        - It does not measure complexity; it measures reviewability/maintainability risk.
+        - Scope is intentionally limited to runtime code (app/).
+        """
+
+        app_dir = project_root / "app"
+        if not app_dir.exists():
+            pytest.skip("app/ directory not found")
+
+        offenders: list[tuple[Path, int]] = []
+        for py_file in sorted(app_dir.rglob("*.py")):
+            if py_file.name == "__init__.py":
+                continue
+
+            rel_path = py_file.relative_to(project_root)
+            if rel_path in self._LARGE_FILE_ALLOWLIST:
+                logger.warning(
+                    "code_quality.large_file_allowlisted",
+                    event="code_quality.large_file_allowlisted",
+                    path=str(rel_path),
+                    recovery="Refactor/split the module and remove it from the allowlist",
+                )
+                continue
+
+            try:
+                content = py_file.read_text(encoding="utf-8", errors="replace")
+            except Exception as exc:
+                pytest.fail(f"Failed to read {py_file}: {type(exc).__name__}: {exc}")
+
+            line_count = len(content.splitlines())
+            if line_count > self._MAX_SOURCE_LINES:
+                offenders.append((py_file, line_count))
+
+        if offenders:
+            lines = [
+                "",
+                "=" * 80,
+                "CODE QUALITY VIOLATION: LARGE_SOURCE_FILE",
+                "=" * 80,
+                "",
+                f"Policy: app/ Python files (excluding __init__.py) must be <= {self._MAX_SOURCE_LINES} lines.",
+                "",
+                "Offenders:",
+            ]
+
+            for path, count in offenders:
+                rel = path.relative_to(project_root)
+                lines.append(f"- {rel} (lines={count}, limit={self._MAX_SOURCE_LINES})")
+
+            lines += [
+                "",
+                "How to remediate (pick the smallest change that improves structure):",
+                "- Split the module into smaller modules (e.g., move helpers into a sibling file).",
+                "- Extract helper functions/classes to reduce file length and isolate responsibilities.",
+                "- Separate IO/networking from parsing/processing logic.",
+                "",
+                "=" * 80,
+            ]
+
+            pytest.fail("\n".join(lines))
 
 
 class TestCodeQualityMetrics:
