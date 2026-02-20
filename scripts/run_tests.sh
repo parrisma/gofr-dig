@@ -160,7 +160,11 @@ cleanup_environment() {
 run_code_quality_gate() {
     echo -e "${BLUE}Running code quality gate...${NC}"
     set +e
-    uv run python -m pytest ${TEST_DIR}/code_quality/test_code_quality.py -v
+    if [ -n "${ALLOWLIST_FILE}" ]; then
+        uv run python -m pytest ${TEST_DIR}/code_quality/test_code_quality.py -v --allowlist-file "${ALLOWLIST_FILE}"
+    else
+        uv run python -m pytest ${TEST_DIR}/code_quality/test_code_quality.py -v
+    fi
     local gate_exit_code=$?
     set -e
 
@@ -239,6 +243,7 @@ RUN_SIMULATOR=false
 STOP_ONLY=false
 CLEANUP_ONLY=false
 USE_DOCKER=true   # Default: use Docker container hostnames for integration tests
+ALLOWLIST_FILE=""
 PYTEST_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -291,6 +296,14 @@ while [[ $# -gt 0 ]]; do
             CLEANUP_ONLY=true
             shift
             ;;
+        --allowlist-file)
+            if [ $# -lt 2 ]; then
+                echo -e "${RED}Error: --allowlist-file requires a path argument${NC}"
+                exit 1
+            fi
+            ALLOWLIST_FILE="$2"
+            shift 2
+            ;;
         --help|-h)
             echo "Usage: $0 [OPTIONS] [PYTEST_ARGS...]"
             echo ""
@@ -306,6 +319,7 @@ while [[ $# -gt 0 ]]; do
             echo "  --with-servers   Start Docker services (default)"
             echo "  --stop           Stop Docker services and exit"
             echo "  --cleanup-only   Clean environment and exit"
+            echo "  --allowlist-file <path>  Code quality allowlist JSON file path"
             echo "  --help, -h       Show this help message"
             exit 0
             ;;
@@ -395,6 +409,11 @@ if [ "$COVERAGE" = true ]; then
     echo -e "${BLUE}Coverage reporting enabled${NC}"
 fi
 
+ALLOWLIST_ARGS=()
+if [ -n "${ALLOWLIST_FILE}" ]; then
+    ALLOWLIST_ARGS=("--allowlist-file" "${ALLOWLIST_FILE}")
+fi
+
 # =============================================================================
 # RUN TESTS
 # =============================================================================
@@ -405,26 +424,26 @@ TEST_EXIT_CODE=0
 
 if [ "$RUN_INTEGRATION" = true ]; then
     echo -e "${BLUE}Running integration tests (with servers)...${NC}"
-    uv run python -m pytest ${TEST_DIR}/integration/ -v ${COVERAGE_ARGS}
+    uv run python -m pytest ${TEST_DIR}/integration/ -v "${ALLOWLIST_ARGS[@]}" ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 
 elif [ "$RUN_SIMULATOR" = true ]; then
     echo -e "${BLUE}Running simulator tests (no servers)...${NC}"
-    uv run python -m pytest ${TEST_DIR}/simulator/ -v ${COVERAGE_ARGS}
+    uv run python -m pytest ${TEST_DIR}/simulator/ -v "${ALLOWLIST_ARGS[@]}" ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 
 elif [ "$RUN_ALL" = true ]; then
     echo -e "${BLUE}Running ALL tests...${NC}"
-    uv run python -m pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS}
+    uv run python -m pytest ${TEST_DIR}/ -v "${ALLOWLIST_ARGS[@]}" ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 
 elif [ ${#PYTEST_ARGS[@]} -eq 0 ]; then
     # Default: run all tests
-    uv run python -m pytest ${TEST_DIR}/ -v ${COVERAGE_ARGS}
+    uv run python -m pytest ${TEST_DIR}/ -v "${ALLOWLIST_ARGS[@]}" ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 else
     # Custom arguments
-    uv run python -m pytest "${PYTEST_ARGS[@]}" ${COVERAGE_ARGS}
+    uv run python -m pytest "${PYTEST_ARGS[@]}" "${ALLOWLIST_ARGS[@]}" ${COVERAGE_ARGS}
     TEST_EXIT_CODE=$?
 fi
 set -e

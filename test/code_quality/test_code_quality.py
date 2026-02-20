@@ -33,17 +33,85 @@ class TestCodeQuality:
     """Test suite for enforcing code quality standards."""
 
     _MAX_SOURCE_LINES = 1000
-    _LARGE_FILE_ALLOWLIST = {
-        Path("app/mcp_server/mcp_server.py"),
-    }
 
     _RADON_MAX_OFFENDERS = 10
-    _RADON_ALLOWLIST: set[tuple[str, str]] = {
-        ("app/mcp_server/mcp_server.py", "_handle_get_content"),
-        ("app/processing/news_parser.py", "_story_from_block"),
-    }
 
-    @pytest.fixture
+    @pytest.fixture(scope="session")
+    def code_quality_allowlist(self, request, project_root):
+        """Load code quality allowlists from JSON.
+
+        Path is controlled by pytest option --allowlist-file (default test/code_quality/allow.json).
+        If file does not exist, allowlists are empty and a warning is logged.
+        """
+
+        raw_path = request.config.getoption("--allowlist-file")
+        allowlist_path = Path(str(raw_path))
+        if not allowlist_path.is_absolute():
+            allowlist_path = project_root / allowlist_path
+
+        if not allowlist_path.exists():
+            logger.warning(
+                "code_quality.allowlist_missing",
+                event="code_quality.allowlist_missing",
+                path=str(allowlist_path),
+                recovery="Create the allowlist JSON file or pass --allowlist-file to point to one",
+            )
+            return {"large_files": set(), "radon": set()}
+
+        try:
+            payload = json.loads(allowlist_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            pytest.fail(
+                "Failed to parse code quality allowlist JSON "
+                f"({allowlist_path}): {type(exc).__name__}: {exc}"
+            )
+
+        large_files_raw = payload.get("large_files") if isinstance(payload, dict) else None
+        large_files: set[Path] = set()
+        if isinstance(large_files_raw, list):
+            for entry in large_files_raw:
+                if isinstance(entry, str) and entry.strip():
+                    large_files.add(Path(entry.strip()))
+                else:
+                    logger.warning(
+                        "code_quality.allowlist_invalid_large_file",
+                        event="code_quality.allowlist_invalid_large_file",
+                        entry=str(entry),
+                        recovery="Use a string path like 'app/mcp_server/mcp_server.py'",
+                    )
+
+        radon_raw = payload.get("radon") if isinstance(payload, dict) else None
+        radon: set[tuple[str, str]] = set()
+        if isinstance(radon_raw, list):
+            for entry in radon_raw:
+                if not isinstance(entry, dict):
+                    logger.warning(
+                        "code_quality.allowlist_invalid_radon_entry",
+                        event="code_quality.allowlist_invalid_radon_entry",
+                        entry=str(entry),
+                        recovery="Use objects like {file: 'app/x.py', function: 'func_name'}",
+                    )
+                    continue
+
+                file_val = entry.get("file")
+                func_val = entry.get("function")
+                if isinstance(file_val, str) and isinstance(func_val, str):
+                    file_str = file_val.strip()
+                    func_str = func_val.strip()
+                    if file_str and func_str:
+                        radon.add((file_str, func_str))
+                        continue
+
+                logger.warning(
+                    "code_quality.allowlist_invalid_radon_fields",
+                    event="code_quality.allowlist_invalid_radon_fields",
+                    entry=str(entry),
+                    recovery="Ensure both 'file' and 'function' are non-empty strings",
+                )
+
+        return {"large_files": large_files, "radon": radon}
+
+    @pytest.fixture(scope="session")
     def project_root(self):
         """Get the project root directory."""
         # test/code_quality/test_code_quality.py -> test/code_quality -> test -> project_root
@@ -64,7 +132,7 @@ class TestCodeQuality:
         except Exception:
             pass
 
-        pytest.skip("ruff not found - install with: pip install ruff")
+        pytest.skip("ruff not found - install with: uv sync --group dev")
 
     @pytest.fixture
     def pyright_executable(self, project_root):
@@ -93,7 +161,7 @@ class TestCodeQuality:
         except Exception:
             pass
 
-        pytest.skip("pyright not found - install with: pip install pyright")
+        pytest.skip("pyright not found - install with: uv sync --group dev")
 
     @pytest.fixture
     def radon_executable(self, project_root):
@@ -308,7 +376,7 @@ class TestCodeQuality:
             )
             pytest.fail("\n".join(error_message))
 
-    def test_no_very_large_source_files(self, project_root):
+    def test_no_very_large_source_files(self, project_root, code_quality_allowlist):
         """Pragmatic gate: fail if app/ contains very large Python source files.
 
         This is complementary to Ruff/Pyright/Radon:
@@ -326,7 +394,7 @@ class TestCodeQuality:
                 continue
 
             rel_path = py_file.relative_to(project_root)
-            if rel_path in self._LARGE_FILE_ALLOWLIST:
+            if rel_path in code_quality_allowlist["large_files"]:
                 logger.warning(
                     "code_quality.large_file_allowlisted",
                     event="code_quality.large_file_allowlisted",
@@ -372,7 +440,12 @@ class TestCodeQuality:
 
             pytest.fail("\n".join(lines))
 
-    def test_no_excessive_cyclomatic_complexity(self, project_root, radon_executable):
+    def test_no_excessive_cyclomatic_complexity(
+        self,
+        project_root,
+        radon_executable,
+        code_quality_allowlist,
+    ):
         """Pragmatic gate: fail on clearly excessive cyclomatic complexity in app/.
 
         Implementation notes:
@@ -482,7 +555,7 @@ class TestCodeQuality:
                     "grade": grade,
                 }
 
-                if key in self._RADON_ALLOWLIST:
+                if key in code_quality_allowlist["radon"]:
                     allowlisted_hits.append(entry)
                 else:
                     offenders.append(entry)

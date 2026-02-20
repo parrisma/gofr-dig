@@ -22,6 +22,15 @@ from gofr_common.auth.backends import VaultClient, VaultConfig, VaultGroupStore,
 from app.config import Config
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--allowlist-file",
+        action="store",
+        default="test/code_quality/allow.json",
+        help="Code quality allowlist JSON file path (default: test/code_quality/allow.json)",
+    )
+
+
 # ============================================================================
 # AUTH AND TOKEN CONFIGURATION
 # ============================================================================

@@ -1,0 +1,9 @@
+{
+  "large_files": [
+    "app/mcp_server/mcp_server.py"
+  ],
+  "radon": [
+    {"file": "app/mcp_server/mcp_server.py", "function": "_handle_get_content"},
+    {"file": "app/processing/news_parser.py", "function": "_story_from_block"}
+  ]
+}
