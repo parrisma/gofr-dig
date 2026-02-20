@@ -42,7 +42,7 @@ To stop:
 For contributing code or running tests:
 
 ```bash
-./scripts/run-dev-container.sh
+./scripts/run-dev.sh
 ```
 
 ## Integrations

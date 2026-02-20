@@ -57,8 +57,8 @@ fi
 
 # Source centralized environment configuration
 export GOFR_DIG_ENV="TEST"
-if [ -f "${SCRIPT_DIR}/gofr-dig.env" ]; then
-    source "${SCRIPT_DIR}/gofr-dig.env"
+if [ -f "${SCRIPT_DIR}/project.env" ]; then
+    source "${SCRIPT_DIR}/project.env"
 fi
 
 # Load centralized port config (single source of truth)
@@ -103,7 +103,7 @@ mkdir -p "${LOG_DIR}"
 mkdir -p "${GOFR_DIG_STORAGE:-${PROJECT_ROOT}/data/storage}"
 
 # Vault test configuration
-VAULT_CONTAINER_NAME="gofr-vault-test"
+VAULT_CONTAINER_NAME="gofr-dig-vault-test"
 VAULT_INTERNAL_PORT=8200
 VAULT_TEST_PORT="${GOFR_VAULT_PORT_TEST:?GOFR_VAULT_PORT_TEST not set — source gofr_ports.env}"
 VAULT_TEST_TOKEN="${GOFR_TEST_VAULT_DEV_TOKEN:-gofr-dev-root-token}"

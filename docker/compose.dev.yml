@@ -36,8 +36,8 @@ services:
   # ==========================================================================
   vault:
     image: hashicorp/vault:1.15.4
-    container_name: gofr-vault-test
-    hostname: gofr-vault-test
+    container_name: gofr-dig-vault-test
+    hostname: gofr-dig-vault-test
     restart: "no"
     cap_add:
       - IPC_LOCK
@@ -63,13 +63,13 @@ services:
   # ==========================================================================
   vault-init:
     image: hashicorp/vault:1.15.4
-    container_name: gofr-vault-init-test
+    container_name: gofr-dig-vault-init-test
     restart: "no"
     depends_on:
       vault:
         condition: service_healthy
     environment:
-      - VAULT_ADDR=http://gofr-vault-test:8200
+      - VAULT_ADDR=http://gofr-dig-vault-test:8200
       - VAULT_TOKEN=gofr-dev-root-token
     entrypoint: ["/bin/sh", "-c"]
     command:
@@ -124,7 +124,7 @@ services:
       - GOFR_DIG_USE_VAULT_IDENTITY=${GOFR_DIG_USE_VAULT_IDENTITY:-0}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=vault
-      - GOFR_DIG_VAULT_URL=http://gofr-vault-test:8200
+      - GOFR_DIG_VAULT_URL=http://gofr-dig-vault-test:8200
       - GOFR_DIG_VAULT_TOKEN=gofr-dev-root-token
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}
@@ -210,7 +210,7 @@ services:
       - GOFR_DIG_USE_VAULT_IDENTITY=${GOFR_DIG_USE_VAULT_IDENTITY:-0}
       # Auth backend (vault only)
       - GOFR_DIG_AUTH_BACKEND=vault
-      - GOFR_DIG_VAULT_URL=http://gofr-vault-test:8200
+      - GOFR_DIG_VAULT_URL=http://gofr-dig-vault-test:8200
       - GOFR_DIG_VAULT_TOKEN=gofr-dev-root-token
       - GOFR_DIG_VAULT_PATH_PREFIX=${GOFR_DIG_VAULT_PATH_PREFIX:-gofr/auth}
       - GOFR_DIG_VAULT_MOUNT=${GOFR_DIG_VAULT_MOUNT:-secret}

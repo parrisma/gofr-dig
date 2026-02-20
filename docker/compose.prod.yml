@@ -236,4 +236,4 @@ volumes:
   gofr-secrets:
     name: gofr-secrets
     external: true
-    # Shared secrets volume — created by run-dev-container.sh or migrate_secrets_to_volume.sh
+    # Shared secrets volume — created by run-dev.sh or migrate_secrets_to_volume.sh
