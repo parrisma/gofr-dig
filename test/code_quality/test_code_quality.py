@@ -11,12 +11,22 @@ If a linting error is a false positive, it must be explicitly suppressed with
 a comment explaining why (e.g., # noqa: F401 - imported for re-export).
 """
 
+import json
 import subprocess
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
 from app.logger import session_logger as logger
+
+
+class _RadonOffender(TypedDict):
+    file: str
+    function: str
+    line: int
+    cc: int
+    grade: str
 
 
 class TestCodeQuality:
@@ -25,6 +35,12 @@ class TestCodeQuality:
     _MAX_SOURCE_LINES = 1000
     _LARGE_FILE_ALLOWLIST = {
         Path("app/mcp_server/mcp_server.py"),
+    }
+
+    _RADON_MAX_OFFENDERS = 10
+    _RADON_ALLOWLIST: set[tuple[str, str]] = {
+        ("app/mcp_server/mcp_server.py", "_handle_get_content"),
+        ("app/processing/news_parser.py", "_story_from_block"),
     }
 
     @pytest.fixture
@@ -78,6 +94,22 @@ class TestCodeQuality:
             pass
 
         pytest.skip("pyright not found - install with: pip install pyright")
+
+    @pytest.fixture
+    def radon_executable(self, project_root):
+        """Get the path to the radon executable."""
+        venv_radon = project_root / ".venv" / "bin" / "radon"
+        if venv_radon.exists():
+            return str(venv_radon)
+
+        try:
+            result = subprocess.run(["which", "radon"], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+
+        pytest.skip("radon not found - install with: uv add --group dev radon")
 
     def test_no_linting_errors(self, project_root, ruff_executable):
         """
@@ -339,6 +371,199 @@ class TestCodeQuality:
             ]
 
             pytest.fail("\n".join(lines))
+
+    def test_no_excessive_cyclomatic_complexity(self, project_root, radon_executable):
+        """Pragmatic gate: fail on clearly excessive cyclomatic complexity in app/.
+
+        Implementation notes:
+        - Uses radon JSON output and emits a deterministic summary (LLM-friendly).
+        - Fails only for high grades:
+          - E/F anywhere in app/
+          - D anywhere in app/
+        """
+
+        app_dir = project_root / "app"
+        if not app_dir.exists():
+            pytest.skip("app/ directory not found")
+
+        result = subprocess.run(
+            [radon_executable, "cc", "-j", "app"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+        )
+
+        if result.returncode != 0:
+            pytest.fail(
+                "\n".join(
+                    [
+                        "",
+                        "=" * 80,
+                        "CODE QUALITY VIOLATION: RADON_EXECUTION_FAILED",
+                        "=" * 80,
+                        "",
+                        "Cause: radon returned a non-zero exit code.",
+                        "",
+                        "Stdout:",
+                        result.stdout,
+                        "",
+                        "Stderr:",
+                        result.stderr,
+                        "",
+                        "Recovery: ensure radon is installed (uv add --group dev radon) and rerun.",
+                        "",
+                        "=" * 80,
+                    ]
+                )
+            )
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except Exception as exc:
+            pytest.fail(f"Failed to parse radon JSON output: {type(exc).__name__}: {exc}")
+
+        offenders: list[_RadonOffender] = []
+        allowlisted_hits: list[_RadonOffender] = []
+
+        if not isinstance(payload, dict):
+            pytest.fail("Radon JSON output has unexpected top-level type")
+
+        for raw_file_path, blocks in payload.items():
+            if not isinstance(raw_file_path, str):
+                continue
+
+            file_path = Path(raw_file_path)
+            if file_path.is_absolute():
+                try:
+                    file_path = file_path.relative_to(project_root)
+                except Exception:
+                    continue
+
+            # Normalize to repo-relative POSIX path.
+            file_rel = file_path.as_posix()
+
+            if not file_rel.startswith("app/"):
+                continue
+            if file_path.name == "__init__.py":
+                continue
+
+            if not isinstance(blocks, list):
+                continue
+
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+
+                name = block.get("name")
+                lineno = block.get("lineno")
+                complexity = block.get("complexity")
+                rank = block.get("rank")
+
+                if not isinstance(name, str):
+                    continue
+                if not isinstance(lineno, int):
+                    lineno = 0
+                if not isinstance(complexity, int):
+                    continue
+
+                grade = str(rank) if isinstance(rank, str) else _cc_grade(complexity)
+                grade = grade.upper()
+
+                # Pragmatic thresholds for initial rollout (app/ only).
+                if grade not in {"D", "E", "F"}:
+                    continue
+
+                key = (file_rel, name)
+                entry: _RadonOffender = {
+                    "file": file_rel,
+                    "function": name,
+                    "line": lineno,
+                    "cc": complexity,
+                    "grade": grade,
+                }
+
+                if key in self._RADON_ALLOWLIST:
+                    allowlisted_hits.append(entry)
+                else:
+                    offenders.append(entry)
+
+        # Warn on allowlisted complexity hotspots so they stay visible.
+        for entry in allowlisted_hits:
+            logger.warning(
+                "code_quality.complexity_allowlisted",
+                event="code_quality.complexity_allowlisted",
+                path=entry["file"],
+                function=entry["function"],
+                grade=entry["grade"],
+                cc=entry["cc"],
+                recovery="Refactor/split the function and remove it from the Radon allowlist",
+            )
+
+        if not offenders:
+            return
+
+        offenders.sort(
+            key=lambda e: (_grade_severity(e["grade"]), e["cc"]),
+            reverse=True,
+        )
+
+        top = offenders[: self._RADON_MAX_OFFENDERS]
+        lines: list[str] = [
+            "",
+            "=" * 80,
+            "CODE QUALITY VIOLATION: COMPLEXITY_VIOLATION",
+            "=" * 80,
+            "",
+            "Policy: app/ functions must not exceed cyclomatic complexity grade D/E/F thresholds.",
+            "",
+        ]
+
+        for entry in top:
+            file_path = entry["file"]
+            function = entry["function"]
+            line = entry["line"]
+            cc = entry["cc"]
+            grade = entry["grade"]
+
+            lines += [
+                "COMPLEXITY_VIOLATION",
+                f"file: {file_path}",
+                f"function: {function}",
+                f"line: {line}",
+                f"cc: {cc}",
+                f"grade: {grade}",
+                "why: cyclomatic complexity exceeds allowed threshold",
+                "action: split into helper functions; reduce nesting via early returns; separate IO from parsing",
+                "",
+            ]
+
+        lines += [
+            "To remediate: open the file/function above and refactor to reduce branching; keep behavior identical; add/adjust tests.",
+            "",
+            "=" * 80,
+        ]
+
+        pytest.fail("\n".join(lines))
+
+
+def _cc_grade(complexity: int) -> str:
+    if complexity <= 5:
+        return "A"
+    if complexity <= 10:
+        return "B"
+    if complexity <= 20:
+        return "C"
+    if complexity <= 30:
+        return "D"
+    if complexity <= 40:
+        return "E"
+    return "F"
+
+
+def _grade_severity(grade: str) -> int:
+    # Higher is more severe.
+    order = {"A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6}
+    return order.get(grade.upper(), 0)
 
 
 class TestCodeQualityMetrics:

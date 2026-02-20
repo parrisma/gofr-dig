@@ -56,7 +56,6 @@ Implementation shape (conceptual):
 
 - Resolve radon executable from .venv/bin/radon (like ruff/pyright resolution)
 - subprocess.run([radon, "cc", ...])
-- subprocess.run([radon, "cc", ...])
 - Parse JSON output
 - Collect offenders and fail with a compact report + recovery guidance
 
