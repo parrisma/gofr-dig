@@ -176,4 +176,10 @@ logs/*.txt
 data/sessions/**/*.json
 data/storage/**/*.json
 
-!lib/gofr-common
+# Allow gofr-common git submodule.
+# Note: lib/ is ignored above for Python packaging conventions; we unignore the
+# folder but keep everything under it ignored, except the submodule.
+!lib/
+lib/*
+!lib/gofr-common/
+!lib/gofr-common/**
