@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-ENV_FILE="$SCRIPT_DIR/gofr-dig.env"
+ENV_FILE="$SCRIPT_DIR/project.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
     echo "Error: environment file not found: $ENV_FILE" >&2
@@ -45,7 +45,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Re-source gofr-dig.env with potentially updated GOFR_DIG_ENV to pick up correct paths
+# Re-source project.env with potentially updated GOFR_DIG_ENV to pick up correct paths
 source "$ENV_FILE"
 
 if [[ -z "${GOFR_DIG_ROOT:-}" ]]; then

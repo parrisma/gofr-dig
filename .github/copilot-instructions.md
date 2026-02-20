@@ -18,6 +18,7 @@ R6 ASCII: ASCII only in code/output. No emoji/Unicode/box drawing.
 R7 GIT: Never rewrite pushed history (no `--amend`, no `rebase -i`). Use follow-up commits.
 R8 PYTHON: UV only (`uv run`, `uv add`, `uv sync`). No pip/venv.
 R9 LOGGING: `StructuredLogger` only. Never `print()` or stdlib `logging`.
+R10 NEVER GIT ADD, COMMIT, PUSH ETC unless asked directly
 
 ## A2. WORKFLOW (DECISION TREE)
 
@@ -97,9 +98,7 @@ SCRIPTS (use these; do not reinvent workflows):
 | `scripts/stop-prod.sh` | Stop production containers. |
 | `scripts/start-test-env.sh` | Spin up ephemeral test services (Vault, SEQ, etc.). |
 | `scripts/storage_manager.sh` | Storage management operations. |
-| `scripts/restart_servers.sh` | Restart running servers. |
 | `scripts/backup_now.sh` | Trigger an immediate backup. |
 | `scripts/restore_backup.sh` | Restore from a backup. |
 | `scripts/list_backups.sh` | List available backups. |
 | `scripts/bootstrap_gofr_dig.sh` | Bootstrap gofr-dig environment. |
-| `scripts/scan_container_security.sh` | Scan container images for vulnerabilities. |
