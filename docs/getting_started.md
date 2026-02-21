@@ -29,12 +29,12 @@ This guide explains how to install, run, and integrate `gofr-dig`.
 Start the full stack (MCP server, API, Documentation, etc.) in detached mode:
 
 ```bash
-./scripts/start-prod.sh
+./docker/start-prod.sh
 ```
 
 To stop:
 ```bash
-./scripts/start-prod.sh --down
+./docker/start-prod.sh --down
 ```
 
 ### Development Mode

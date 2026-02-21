@@ -42,7 +42,7 @@ Execution Log:
 - Run:
   - `./scripts/bootstrap_gofr_dig.sh --yes`
   - `./lib/gofr-common/scripts/bootstrap_seq.sh` (or chosen location)
-  - `./scripts/start-prod.sh` and confirm SEQ configured
+  - `./docker/start-prod.sh` and confirm SEQ configured
 
 ## Step 5 — Acceptance
 - Run full suite: `./scripts/run_tests.sh`.

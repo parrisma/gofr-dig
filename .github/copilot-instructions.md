@@ -94,8 +94,8 @@ SCRIPTS (use these; do not reinvent workflows):
 | Script | Purpose |
 |--------|---------|
 | `scripts/run_tests.sh` | Run tests (unit, integration, coverage). THE test entry point. |
-| `scripts/start-prod.sh` | Start (or `--build` and start) the production containers. |
-| `scripts/stop-prod.sh` | Stop production containers. |
+| `docker/start-prod.sh` | Start (or `--build` and start) the production containers. |
+| `docker/stop-prod.sh` | Stop production containers. |
 | `scripts/start-test-env.sh` | Spin up ephemeral test services (Vault, SEQ, etc.). |
 | `scripts/storage_manager.sh` | Storage management operations. |
 | `scripts/backup_now.sh` | Trigger an immediate backup. |

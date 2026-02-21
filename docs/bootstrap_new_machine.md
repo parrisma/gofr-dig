@@ -43,7 +43,7 @@ Then run:
 After bootstrap completes:
 
 ```bash
-./scripts/start-prod.sh
+./docker/start-prod.sh
 ```
 
 ## (Optional) Bootstrap SEQ Logging Secrets
@@ -57,14 +57,14 @@ If `start-prod.sh` reports SEQ logging secrets missing (degraded logging mode), 
 Then restart the stack so services reload env:
 
 ```bash
-./scripts/start-prod.sh --down
-./scripts/start-prod.sh
+./docker/start-prod.sh --down
+./docker/start-prod.sh
 ```
 
 Optional rebuild on first run if needed:
 
 ```bash
-./scripts/start-prod.sh --build
+./docker/start-prod.sh --build
 ```
 
 ## Verify Auth Bootstrap Works
@@ -103,5 +103,5 @@ Expected behavior:
 ## One-Liner for Most Cases
 
 ```bash
-git submodule update --init --recursive && ./scripts/bootstrap_gofr_dig.sh --yes && ./scripts/start-prod.sh
+git submodule update --init --recursive && ./scripts/bootstrap_gofr_dig.sh --yes && ./docker/start-prod.sh
 ```

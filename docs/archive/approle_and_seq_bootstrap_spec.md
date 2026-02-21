@@ -21,7 +21,7 @@ Make first-run bootstrap on a new machine fully operational by:
 - `scripts/bootstrap_gofr_dig.sh`:
   - bootstraps platform and verifies Vault health.
   - calls `ensure_approle_creds` which checks only for `secrets/service_creds/gofr-dig.json` (or gofr-common fallback) and then runs `scripts/ensure_approle.sh`.
-- `scripts/start-prod.sh`:
+- `docker/start-prod.sh`:
   - attempts to read SEQ secrets from Vault:
     - `secret/gofr/config/logging/seq-url` field `value`
     - `secret/gofr/config/logging/seq-api-key` field `value`
@@ -57,7 +57,7 @@ Make first-run bootstrap on a new machine fully operational by:
 ## Acceptance Criteria
 1. Running `./scripts/bootstrap_gofr_dig.sh --yes` results in both AppRole creds files present.
 2. Running `./lib/gofr-common/scripts/bootstrap_seq.sh` (or chosen location) successfully writes SEQ secrets into Vault.
-3. After SEQ secrets are written, `./scripts/start-prod.sh` reports `Logging sink: SEQ configured via Vault AppRole`.
+3. After SEQ secrets are written, `./docker/start-prod.sh` reports `Logging sink: SEQ configured via Vault AppRole`.
 4. Full test suite passes: `./scripts/run_tests.sh`.
 
 ## Open Questions (need confirmation)

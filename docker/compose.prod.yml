@@ -6,10 +6,10 @@
 #
 # Usage:
 #   Use start-prod.sh to start production stack (recommended):
-#     ./scripts/start-prod.sh               # Auto-builds image, starts stack
-#     ./scripts/start-prod.sh --no-auth     # Start without JWT authentication
-#     ./scripts/start-prod.sh --port-offset 100  # Shift host ports by N
-#     ./scripts/start-prod.sh --build       # Force-rebuild image first
+#     ./docker/start-prod.sh               # Auto-builds image, starts stack
+#     ./docker/start-prod.sh --no-auth     # Start without JWT authentication
+#     ./docker/start-prod.sh --port-offset 100  # Shift host ports by N
+#     ./docker/start-prod.sh --build       # Force-rebuild image first
 #
 #   Or manually:
 #     cd docker

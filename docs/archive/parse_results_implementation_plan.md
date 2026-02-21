@@ -258,7 +258,7 @@ BEFORE storage.
 3. ~~Add argument extraction + crawl_time_utc injection + parser call in `_handle_get_content`.~~ **DONE**
 4. ~~Write tests, run `./scripts/run_tests.sh --unit`.~~ **DONE** — 466 passed, 33 deselected
 5. ~~Update `docs/workflow.md` with parse-mode workflow example.~~ **DONE**
-6. Rebuild prod: `./scripts/start-prod.sh --build`. (manual step)
+6. Rebuild prod: `./docker/start-prod.sh --build`. (manual step)
 7. ~~Rewrite `docs/tools.md` from scratch to reflect the actual code~~ **DONE** — read every Tool()
    definition and RECOVERY_STRATEGIES key from the codebase and produce an authoritative
    reference that matches the live implementation. This is the final step because it

@@ -68,7 +68,7 @@ This plan operationalizes the requirements in `docs/logging_vault_integration_gu
 
 ## Phase 3 — Vault Secret Bootstrap for Logging Sink
 ### 3.1 Startup secret retrieval
-- [x] Update `scripts/start-prod.sh` to read logging sink secrets from Vault (AppRole-authenticated path only).
+- [x] Update `docker/start-prod.sh` to read logging sink secrets from Vault (AppRole-authenticated path only).
 - [x] Export runtime env vars for process scope only (no disk persistence).
 - [x] Expected vars:
   - [x] `GOFR_DIG_SEQ_URL`

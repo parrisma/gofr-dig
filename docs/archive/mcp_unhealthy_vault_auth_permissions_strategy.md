@@ -3,7 +3,7 @@
 Date: 2026-02-15
 
 ## Symptom
-- `./scripts/start-prod.sh` starts the stack but `gofr-dig-mcp` restarts/unhealthy.
+- `./docker/start-prod.sh` starts the stack but `gofr-dig-mcp` restarts/unhealthy.
 - Container logs show:
   - `VaultPermissionError: Permission denied: gofr/auth/groups/_index/names`
   - HTTP call denied: `GET /v1/secret/data/gofr/auth/groups/_index/names`
@@ -32,5 +32,5 @@ Date: 2026-02-15
 
 ## Validation
 - `docker logs gofr-dig-mcp` no longer shows `VaultPermissionError`.
-- `./scripts/start-prod.sh` completes successfully and all services are healthy.
+- `./docker/start-prod.sh` completes successfully and all services are healthy.
 - Optional: run `./scripts/run_tests.sh --unit` to sanity-check auth startup paths.

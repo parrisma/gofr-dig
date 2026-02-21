@@ -11,7 +11,7 @@ See **[Getting Started](docs/getting_started.md)** for detailed integration guid
 git submodule update --init --recursive
 ./scripts/bootstrap_gofr_dig.sh --yes
 ./lib/gofr-common/scripts/bootstrap_seq.sh
-./scripts/start-prod.sh
+./docker/start-prod.sh
 ./lib/gofr-common/scripts/auth_manager.sh --docker groups list
 ./scripts/run_tests.sh
 ```
@@ -37,7 +37,7 @@ git submodule update --init --recursive
 ### 2. Run Production
 ```bash
 # Start production stack (MCP :8070, MCPO :8071, Web :8072)
-./scripts/start-prod.sh
+./docker/start-prod.sh
 ```
 
 ### 3. Verification

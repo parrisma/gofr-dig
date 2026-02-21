@@ -6,18 +6,18 @@ Operational runbook for rotating SEQ ingestion credentials and handling degraded
 ## Preconditions
 - Vault is running and unsealed.
 - AppRole credentials exist at `secrets/service_creds/gofr-dig.json`.
-- Production stack is managed via `scripts/start-prod.sh`.
+- Production stack is managed via `docker/start-prod.sh`.
 
 ## Rotate `seq-api-key` (No Image Rebuild)
 1. Write new key to Vault path `secret/gofr/config/logging/seq-api-key` (`value=<new-key>`).
-2. Optionally verify value exists using AppRole auth path used by `scripts/start-prod.sh`.
-3. Restart services with `./scripts/start-prod.sh` (or `./scripts/start-prod.sh --build` only if image changes are needed).
+2. Optionally verify value exists using AppRole auth path used by `docker/start-prod.sh`.
+3. Restart services with `./docker/start-prod.sh` (or `./docker/start-prod.sh --build` only if image changes are needed).
 4. Validate startup summary shows `Logging sink: SEQ configured via Vault AppRole`.
 5. Confirm `logging_sink_initialized` event has `status=ok` in service logs.
 
 ## Rollback
 1. Restore previous key in Vault at the same path.
-2. Restart services via `./scripts/start-prod.sh`.
+2. Restart services via `./docker/start-prod.sh`.
 3. Confirm sink status returns to `ok`.
 
 ## Degraded-Mode Handling

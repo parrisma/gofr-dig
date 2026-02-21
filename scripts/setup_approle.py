@@ -170,7 +170,7 @@ def main() -> int:
         log_info(f"Credentials dir: {SERVICE_CREDS_DIR}")
         log_info("")
         log_info("Next steps:")
-        log_info("  1. Start gofr-dig: ./scripts/start-prod.sh")
+        log_info("  1. Start gofr-dig: ./docker/start-prod.sh")
         log_info("  2. Credentials are auto-mounted to /run/secrets/vault_creds")
     return 0
 

@@ -13,7 +13,7 @@ This is written against the current GOFR-DIG setup:
 
 - logging via `gofr_common.logger.StructuredLogger`,
 - auth/config access via Vault + AppRole,
-- production runtime via `docker/compose.prod.yml` and `scripts/start-prod.sh`.
+- production runtime via `docker/compose.prod.yml` and `docker/start-prod.sh`.
 
 ---
 
@@ -285,7 +285,7 @@ Attach this policy to the existing service role, or a separate role if you want 
 
 ## 4) Startup flow (production)
 
-At startup (`scripts/start-prod.sh` / entrypoint), perform:
+At startup (`docker/start-prod.sh` / entrypoint), perform:
 
 1. AppRole auth (already in place via mounted creds + Vault identity logic).
 2. Read logging sink secrets from Vault.
@@ -341,7 +341,7 @@ For SEQ integration in GOFR-DIG:
 
 ### B) Logging secret bootstrap from Vault
 
-- Update: `scripts/start-prod.sh`
+- Update: `docker/start-prod.sh`
   - Add optional fetch of logging sink secrets from Vault path.
   - Export `GOFR_DIG_SEQ_URL`, `GOFR_DIG_SEQ_API_KEY` to container env (or inject via compose env interpolation).
 

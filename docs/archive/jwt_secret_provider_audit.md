@@ -182,7 +182,7 @@ References only exist in docs/archive/ (historical documentation).
 2. Remove dead `GOFR_JWT_SECRET` env var set/cleanup from
    `test/conftest.py` `configure_test_auth_environment()` (lines 223, 239).
 
-3. Fix stale comment in `scripts/start-prod.sh` line 25. Change from
+3. Fix stale comment in `docker/start-prod.sh` line 25. Change from
    "GOFR_JWT_SECRET env var is only needed as an override" to something like
    "Vault must be running with the JWT secret. No GOFR_JWT_SECRET env var
    is used."

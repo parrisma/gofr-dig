@@ -173,7 +173,7 @@ Returns **0** (success).
 
 **Which script:** Both, different paths
 
-**gofr-dig:** `scripts/start-prod.sh`
+**gofr-dig:** `docker/start-prod.sh`
 **gofr-doc:** `docker/run-prod.sh`
 
 **Assessment:** Same as above — intentional project-specific layout difference. Also note the naming convention differs: gofr-dig uses `start-prod.sh`, gofr-doc uses `run-prod.sh`.
@@ -195,7 +195,7 @@ Returns **0** (success).
 
 **Which script:** Both, different paths
 
-**gofr-dig:** `info "Next: ./scripts/run-dev-container.sh or ./scripts/start-prod.sh"`
+**gofr-dig:** `info "Next: ./scripts/run-dev-container.sh or ./docker/start-prod.sh"`
 **gofr-doc:** `info "Next: ./docker/run-dev.sh or ./docker/run-prod.sh"`
 
 **Assessment:** Consistent with differences #9 and #10.
@@ -215,7 +215,7 @@ Returns **0** (success).
 | 7 | AppRole provisioning command | `bash ensure_approle.sh` | `uv run ensure_approle.py` | Potential inconsistency — verify |
 | 8 | `seed_secrets_volume()` return code when missing | `return 1` | `return 0` | Bug in gofr-dig (should be 0) |
 | 9 | Dev container script path | `scripts/run-dev-container.sh` | `docker/run-dev.sh` | Intentional (project layout) |
-| 10 | Prod stack script path | `scripts/start-prod.sh` | `docker/run-prod.sh` | Intentional (project layout) |
+| 10 | Prod stack script path | `docker/start-prod.sh` | `docker/run-prod.sh` | Intentional (project layout) |
 | 11 | Help message paths | `scripts/` paths | `docker/` paths | Consistent with #9/#10 |
 | 12 | Final "Next:" paths | `scripts/` paths | `docker/` paths | Consistent with #9/#10 |
 
