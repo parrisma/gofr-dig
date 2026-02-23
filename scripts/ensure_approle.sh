@@ -49,10 +49,10 @@ CHECK_ONLY=false
 [ "${1:-}" = "--check" ] && CHECK_ONLY=true
 
 # ---- Helpers ----------------------------------------------------------------
-info()  { echo -e "\033[1;34m[INFO]\033[0m  $*"; }
-ok()    { echo -e "\033[1;32m[OK]\033[0m    $*"; }
-warn()  { echo -e "\033[1;33m[WARN]\033[0m  $*"; }
-err()   { echo -e "\033[1;31m[FAIL]\033[0m  $*" >&2; }
+info()  { echo "[INFO]  $*"; }
+ok()    { echo "[OK]    $*"; }
+warn()  { echo "[WARN]  $*"; }
+err()   { echo "[FAIL]  $*" >&2; }
 
 # ---- Determine mode ---------------------------------------------------------
 # Creds exist?  →  sync policies only (self-healing, no cred regen)
@@ -74,15 +74,17 @@ if [ "$CHECK_ONLY" = true ]; then
 fi
 
 # ---- Vault running? ---------------------------------------------------------
-if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${VAULT_CONTAINER}$"; then
-    err "Vault container '${VAULT_CONTAINER}' is not running."
+VAULT_URL="http://${VAULT_CONTAINER}:${VAULT_PORT}"
+VAULT_STATUS=$(curl -s --connect-timeout 3 --max-time 5 "${VAULT_URL}/v1/sys/health" 2>/dev/null || true)
+
+if [ -z "${VAULT_STATUS}" ]; then
+    err "Vault is not reachable at ${VAULT_URL}."
     err "  Start it:  ./lib/gofr-common/scripts/manage_vault.sh start"
     exit 1
 fi
 
 # ---- Vault unsealed? --------------------------------------------------------
-VAULT_STATUS=$(docker exec "$VAULT_CONTAINER" vault status -format=json 2>/dev/null || echo '{}')
-IS_SEALED=$(echo "$VAULT_STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sealed', True))" 2>/dev/null || echo "True")
+IS_SEALED=$(echo "${VAULT_STATUS}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('sealed', True))" 2>/dev/null || echo "True")
 
 if [ "$IS_SEALED" != "False" ]; then
     err "Vault is sealed."
@@ -122,6 +124,55 @@ export GOFR_VAULT_URL="http://${VAULT_CONTAINER}:${VAULT_PORT}"
 export GOFR_VAULT_TOKEN="$VAULT_ROOT_TOKEN"
 
 cd "$PROJECT_ROOT"
+
+if [ "$CREDS_PRESENT" = true ]; then
+    # Validate existing creds actually work against Vault.
+    # Important: validate ALL required roles (service + admin-control). If either is stale,
+    # we must re-provision; file presence alone is not sufficient.
+
+    validate_creds_file() {
+        local creds_path="$1"
+        local role_id secret_id login_resp
+
+        if [ ! -f "$creds_path" ]; then
+            return 1
+        fi
+
+        role_id=$(python3 -c "import json; print(json.load(open('$creds_path'))['role_id'])" 2>/dev/null || true)
+        secret_id=$(python3 -c "import json; print(json.load(open('$creds_path'))['secret_id'])" 2>/dev/null || true)
+        if [ -z "$role_id" ] || [ -z "$secret_id" ]; then
+            return 1
+        fi
+
+        login_resp=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST -d "{\"role_id\":\"$role_id\",\"secret_id\":\"$secret_id\"}" \
+            "http://${VAULT_CONTAINER}:${VAULT_PORT}/v1/auth/approle/login" 2>/dev/null || echo "000")
+        [ "$login_resp" = "200" ]
+    }
+
+    CREDS_TO_TEST=""
+    ADMIN_CREDS_TO_TEST=""
+
+    if [ -f "$CREDS_FILE" ]; then
+        CREDS_TO_TEST="$CREDS_FILE"
+    elif [ -f "$FALLBACK_CREDS_FILE" ]; then
+        CREDS_TO_TEST="$FALLBACK_CREDS_FILE"
+    fi
+
+    if [ -f "$ADMIN_CREDS_FILE" ]; then
+        ADMIN_CREDS_TO_TEST="$ADMIN_CREDS_FILE"
+    elif [ -f "$FALLBACK_ADMIN_CREDS_FILE" ]; then
+        ADMIN_CREDS_TO_TEST="$FALLBACK_ADMIN_CREDS_FILE"
+    fi
+
+    if validate_creds_file "$CREDS_TO_TEST" && validate_creds_file "$ADMIN_CREDS_TO_TEST"; then
+        info "Existing AppRole credentials validated OK (service + admin-control)"
+    else
+        warn "One or more existing AppRole credential files are invalid -- will re-provision"
+        CREDS_PRESENT=false
+        rm -f "$CREDS_FILE" "$ADMIN_CREDS_FILE" "$FALLBACK_CREDS_FILE" "$FALLBACK_ADMIN_CREDS_FILE" 2>/dev/null || true
+    fi
+fi
 
 if [ "$CREDS_PRESENT" = true ]; then
     # Self-healing: sync policies & roles without regenerating credentials

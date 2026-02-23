@@ -90,8 +90,8 @@ vault_local_addr() {
         vault_port=$(grep -E '^GOFR_VAULT_PORT=' "$PORTS_ENV" | head -n1 | cut -d'=' -f2)
     fi
 
-    vault_port="${vault_port:-8200}"
-    echo "http://127.0.0.1:${vault_port}"
+    vault_port="${vault_port:-8201}"
+    echo "http://gofr-vault:${vault_port}"
 }
 
 approle_login_json() {
@@ -104,9 +104,9 @@ approle_login_json() {
     local output=""
 
     while [ "$attempt" -le "$attempts" ]; do
-        output=$(docker exec \
-            -e VAULT_ADDR="$vault_addr" \
-            gofr-vault vault write -format=json auth/approle/login role_id="$role_id" secret_id="$secret_id" 2>&1)
+        output=$(curl -sf -X POST \
+            -d "{\"role_id\":\"$role_id\",\"secret_id\":\"$secret_id\"}" \
+            "${vault_addr}/v1/auth/approle/login" 2>&1)
 
         if [ $? -eq 0 ] && [ -n "$output" ]; then
             printf '%s' "$output"
@@ -137,14 +137,25 @@ fetch_vault_secret_field() {
     local field_name="$3"
     local vault_addr="$(vault_local_addr)"
 
-    docker exec \
-        -e VAULT_ADDR="$vault_addr" \
-        -e VAULT_TOKEN="$vault_token" \
-        gofr-vault vault kv get -field="$field_name" "$secret_path" 2>/dev/null || true
+    # Convert KV v2 path: secret/foo -> secret/data/foo
+    local api_path="$secret_path"
+    if [[ "$api_path" == secret/* ]]; then
+        api_path="secret/data/${api_path#secret/}"
+    fi
+
+    local resp
+    resp=$(curl -sf \
+        -H "X-Vault-Token: $vault_token" \
+        "${vault_addr}/v1/${api_path}" 2>/dev/null) || true
+
+    if [ -n "$resp" ]; then
+        python3 -c "import json,sys; print(json.loads(sys.argv[1]).get('data',{}).get('data',{}).get(sys.argv[2],''))" "$resp" "$field_name" 2>/dev/null || true
+    fi
 }
 
 bootstrap_logging_sink_env() {
     local creds_file="$PROJECT_ROOT/secrets/service_creds/gofr-dig.json"
+    local fallback_creds="$PROJECT_ROOT/lib/gofr-common/secrets/service_creds/gofr-dig.json"
     local role_id=""
     local secret_id=""
     local login_json=""
@@ -154,9 +165,13 @@ bootstrap_logging_sink_env() {
     local vault_addr="$(vault_local_addr)"
 
     if [ ! -f "$creds_file" ]; then
-        LOGGING_DEGRADED_REASON="approle_creds_missing"
-        warn "Logging sink bootstrap skipped: AppRole creds not found ($creds_file)"
-        return 0
+        if [ -f "$fallback_creds" ]; then
+            creds_file="$fallback_creds"
+        else
+            LOGGING_DEGRADED_REASON="approle_creds_missing"
+            warn "Logging sink bootstrap skipped: AppRole creds not found ($creds_file)"
+            return 0
+        fi
     fi
 
     role_id="$(read_json_field "$creds_file" "role_id")"
@@ -269,16 +284,20 @@ if [ "$NO_AUTH" = true ]; then
     export GOFR_DIG_NO_AUTH=1
     export GOFR_DIG_AUTH_BACKEND=vault
 else
-    # Verify Vault is reachable and has the JWT secret — containers will read it
+    # Verify Vault is reachable and has the JWT secret -- containers will read it
     # at startup via AppRole, but we do a pre-flight check here.
     VAULT_ROOT_TOKEN_FILE="$PROJECT_ROOT/secrets/vault_root_token"
+    VAULT_ROOT_TOKEN_FALLBACK="$PROJECT_ROOT/lib/gofr-common/secrets/vault_root_token"
+    if [ ! -f "$VAULT_ROOT_TOKEN_FILE" ] && [ -f "$VAULT_ROOT_TOKEN_FALLBACK" ]; then
+        VAULT_ROOT_TOKEN_FILE="$VAULT_ROOT_TOKEN_FALLBACK"
+    fi
+    VAULT_PORT="${GOFR_VAULT_PORT:-8201}"
+    VAULT_URL="http://gofr-vault:${VAULT_PORT}"
     if [ -f "$VAULT_ROOT_TOKEN_FILE" ] && docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
-        VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE")
-        VAULT_ADDR_LOCAL="$(vault_local_addr)"
-        JWT_CHECK=$(docker exec \
-            -e VAULT_ADDR="$VAULT_ADDR_LOCAL" \
-            -e VAULT_TOKEN="$VAULT_ROOT_TOKEN" \
-            gofr-vault vault kv get -field=value secret/gofr/config/jwt-signing-secret 2>/dev/null) || true
+        VAULT_ROOT_TOKEN=$(cat "$VAULT_ROOT_TOKEN_FILE" | tr -d '[:space:]')
+        JWT_CHECK=$(curl -sf \
+            -H "X-Vault-Token: $VAULT_ROOT_TOKEN" \
+            "${VAULT_URL}/v1/secret/data/gofr/config/jwt-signing-secret" 2>/dev/null) || true
 
         if [ -n "$JWT_CHECK" ]; then
             ok "JWT secret verified in Vault (containers will read via AppRole)"
@@ -292,7 +311,13 @@ else
             fail "Cannot start without JWT secret in Vault"
         fi
     else
-        warn "Vault is not running — containers will fail to read JWT secret at startup"
+        if ! docker ps --format '{{.Names}}' | grep -q '^gofr-vault$'; then
+            warn "Vault is not running -- containers will fail to read JWT secret at startup"
+        else
+            warn "Vault root token not found -- cannot verify JWT secret"
+            echo "  Tried: $VAULT_ROOT_TOKEN_FILE"
+            echo "         $VAULT_ROOT_TOKEN_FALLBACK"
+        fi
         echo ""
         echo "  Options:"
         echo "    1. Start Vault:      ./lib/gofr-common/scripts/manage_vault.sh bootstrap"
