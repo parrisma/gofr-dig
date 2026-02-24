@@ -12,6 +12,18 @@ echo "======================================================================="
 echo "GOFR-DIG Container Entrypoint"
 echo "======================================================================="
 
+# -----------------------------------------------------------------------
+# Map unknown host GIDs into /etc/group so 'groups' does not warn.
+# The container runs with --user UID:GID from the host; those GIDs may
+# not exist inside the image.
+# -----------------------------------------------------------------------
+for _gid in $(id -G 2>/dev/null); do
+    if ! getent group "$_gid" >/dev/null 2>&1; then
+        sudo groupadd -g "$_gid" "hostgroup_${_gid}" 2>/dev/null || true
+    fi
+done
+unset _gid
+
 ensure_dir() {
     local dir="$1"
     if [ -d "$dir" ]; then
