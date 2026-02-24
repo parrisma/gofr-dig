@@ -3,9 +3,7 @@ set -euo pipefail
 
 # Standard GOFR user paths - all projects use 'gofr' user
 GOFR_USER="gofr"
-# Allow run-dev.sh to mount the project at a non-default path.
-# Default remains the standard GOFR location.
-PROJECT_DIR="${GOFR_DIG_PROJECT_DIR:-/home/${GOFR_USER}/devroot/gofr-dig}"
+PROJECT_DIR="/home/${GOFR_USER}/devroot/gofr-dig"
 # gofr-common is now a git submodule in lib/gofr-common
 COMMON_DIR="$PROJECT_DIR/lib/gofr-common"
 VENV_DIR="$PROJECT_DIR/.venv"

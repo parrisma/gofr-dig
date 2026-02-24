@@ -19,12 +19,10 @@ GOFR_GID=$(id -g)
 CONTAINER_NAME="gofr-dig-dev"
 IMAGE_NAME="gofr-dig-dev:latest"
 
-# Host user's home directory (for container mount paths).
-# Override with --host-home when the default doesn't match.
-#
-# NOTE: This is used as the *container* target path (right side of -v). It does
-# not need to match the container user's actual $HOME.
-HOST_HOME="${HOST_HOME:-}"
+# Fixed container-internal paths (must match image layout; do NOT derive from host home).
+CONTAINER_HOME="/home/gofr"
+CONTAINER_PROJECT_DIR="${CONTAINER_HOME}/devroot/gofr-dig"
+CONTAINER_DOC_DIR="${CONTAINER_HOME}/devroot/gofr-doc"
 
 # Primary network for testing; also connects to gofr-net for Vault access
 DOCKER_NETWORK="${GOFRDIG_DOCKER_NETWORK:-gofr-test-net}"
@@ -32,15 +30,13 @@ GOFR_NETWORK="gofr-net"
 
 usage() {
     cat <<EOF
-Usage: $0 [--network NAME] [--host-home DIR]
+Usage: $0 [--network NAME]
 
 Options:
   --network NAME     Docker network for the dev container (default: $DOCKER_NETWORK)
-  --host-home DIR    Host home directory used to construct container mount paths
   -h, --help         Show this help
 
 Env:
-  HOST_HOME          Same as --host-home
   GOFRDIG_DOCKER_NETWORK  Same as --network
 EOF
 }
@@ -57,15 +53,6 @@ while [ $# -gt 0 ]; do
             DOCKER_NETWORK="$2"
             shift 2
             ;;
-        --host-home)
-            if [ $# -lt 2 ]; then
-                echo "ERROR: --host-home requires a value" >&2
-                usage
-                exit 1
-            fi
-            HOST_HOME="$2"
-            shift 2
-            ;;
         -h|--help)
             usage
             exit 0
@@ -78,31 +65,10 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "$HOST_HOME" ]; then
-    # Prefer the non-root user when invoked via sudo.
-    host_user="${SUDO_USER:-$(id -un)}"
-    host_home_from_passwd="$(getent passwd "$host_user" | cut -d: -f6 || true)"
-    if [ -n "$host_home_from_passwd" ]; then
-        HOST_HOME="$host_home_from_passwd"
-    else
-        HOST_HOME="${HOME:-/home/$host_user}"
-    fi
-fi
-
-if [ ! -d "$HOST_HOME" ]; then
-    echo "ERROR: host home directory does not exist: $HOST_HOME" >&2
-    echo "  Provide a valid path via --host-home DIR" >&2
-    exit 1
-fi
-
-CONTAINER_PROJECT_DIR="${HOST_HOME}/devroot/gofr-dig"
-CONTAINER_DOC_DIR="${HOST_HOME}/devroot/gofr-doc"
-
 echo "======================================================================="
 echo "Starting GOFR-DIG Development Container"
 echo "======================================================================="
 echo "Host user: $(id -un) (UID=${GOFR_UID}, GID=${GOFR_GID})"
-echo "Host home: $HOST_HOME"
 echo "Container will run with --user ${GOFR_UID}:${GOFR_GID}"
 echo "Networks: $DOCKER_NETWORK, $GOFR_NETWORK"
 echo "Ports: none (dev container is for code editing; prod owns the service ports)"
