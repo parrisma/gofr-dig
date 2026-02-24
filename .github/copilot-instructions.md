@@ -8,17 +8,19 @@ ALL RULES ARE MANDATORY.
 
 ## A1. HARD RULES (MUST/NEVER)
 
+RZ ZEROTH RULE: Be diligent and conscientious. Prefer simple, elegant solutions; never hack in changes that introduce technical debt or unnecessary complexity.
 R0 SIMPLICITY: Be brief. Add complexity/verbosity ONLY when needed.
 R1 CLARITY: If ambiguous -> ASK. Never guess intent or make design/product decisions.
 R2 COLLAB: Treat user as partner. Show enough command output for review; do not hide critical output; do not burn context on noise.
 R3 LONG_FORM: If longer than a few sentences -> write `docs/*.md`, not chat.
 R4 FORMAT: Technical chat answers are plain text. Markdown is for documents only.
 R5 NETWORK: Never use `localhost`. Use Docker service names on `gofr-net`. Host Docker: `host.docker.internal`.
+R5a DEV CONTAINER: Running INSIDE a Docker dev container on `gofr-net`. All services (Vault, Neo4j, Redis, etc.) via Docker service names (e.g. `http://gofr-vault:8201`), NEVER `localhost`/`127.0.0.1`. No `docker exec` to reach services; use `curl` or CLI directly.
 R6 ASCII: ASCII only in code/output. No emoji/Unicode/box drawing.
 R7 GIT: Never rewrite pushed history (no `--amend`, no `rebase -i`). Use follow-up commits.
 R8 PYTHON: UV only (`uv run`, `uv add`, `uv sync`). No pip/venv.
 R9 LOGGING: `StructuredLogger` only. Never `print()` or stdlib `logging`.
-R10 NEVER GIT ADD, COMMIT, PUSH ETC unless asked directly
+R10 GIT OPS: Never `git add`/`commit`/`push` unless explicitly asked.
 
 ## A2. WORKFLOW (DECISION TREE)
 
@@ -77,7 +79,7 @@ Review all code as senior engineer + security SME:
 | Script | Purpose |
 |--------|---------|
 | `lib/gofr-common/scripts/auth_env.sh` | Export `VAULT_ADDR`, `VAULT_TOKEN`, `GOFR_JWT_SECRET`. Usage: `source <(./lib/gofr-common/scripts/auth_env.sh --docker)` |
-| `lib/gofr-common/scripts/auth_manager.sh` | Manage auth groups/tokens (list, create, inspect, revoke). |
+| `lib/gofr-common/scripts/auth_manager.sh` | Manage auth groups/tokens (list, create, inspect, revoke). Prefer over `auth_manager.py` directly. Typical: `./lib/gofr-common/scripts/auth_manager.sh groups list` |
 | `lib/gofr-common/scripts/bootstrap_auth.sh` | One-time auth bootstrap (groups + initial tokens). |
 | `lib/gofr-common/scripts/bootstrap_platform.sh` | Idempotent platform bootstrap (Vault, auth, services). |
 | `lib/gofr-common/scripts/manage_vault.sh` | Vault lifecycle: start, stop, status, logs, init, unseal, health. |
